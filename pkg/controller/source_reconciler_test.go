@@ -109,6 +109,11 @@ func (m *MockClient) SubResource(subResource string) client.SubResourceClient {
 	return args.Get(0).(client.SubResourceClient)
 }
 
+func (m *MockClient) Apply(ctx context.Context, obj runtime.ApplyConfiguration, opts ...client.ApplyOption) error {
+	args := m.Called(ctx, obj, opts)
+	return args.Error(0)
+}
+
 // MockNamespaceLister is a mock implementation of NamespaceLister for testing.
 type MockNamespaceLister struct {
 	mock.Mock
