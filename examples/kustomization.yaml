@@ -7,6 +7,9 @@ resources:
     - source-secret.yaml
     - source-configmap.yaml
     - traefik-middleware.yaml
+    - transform-configmap.yaml
+    - transform-secret.yaml
+    - transform-deployment.yaml
 
 commonLabels:
     managed-by: kustomize

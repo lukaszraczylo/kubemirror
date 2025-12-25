@@ -1,0 +1,322 @@
+# Transformation Examples for KubeMirror
+# These examples demonstrate the transformation rules feature
+
+---
+# Example 1: Static Value Transformation
+# Changes LOG_LEVEL to "error" in all mirrors
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config-static
+  namespace: namespace-1
+  annotations:
+    kubemirror.raczylo.com/sync: "true"
+    kubemirror.raczylo.com/target-namespaces: "namespace-2,namespace-3"
+    kubemirror.raczylo.com/transform: |
+      rules:
+        - path: data.LOG_LEVEL
+          value: "error"
+  labels:
+    kubemirror.raczylo.com/enabled: "true"
+    example: "static-value-transform"
+data:
+  LOG_LEVEL: "debug"
+  APP_NAME: "my-app"
+
+---
+# Example 2: Template-Based Transformation
+# Creates namespace-specific API URLs
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config-template
+  namespace: namespace-1
+  annotations:
+    kubemirror.raczylo.com/sync: "true"
+    kubemirror.raczylo.com/target-namespaces: "namespace-2,namespace-3,namespace-4"
+    kubemirror.raczylo.com/transform: |
+      rules:
+        - path: data.API_URL
+          template: "https://{{.TargetNamespace}}.api.example.com"
+        - path: data.NAMESPACE_UPPER
+          template: "{{upper .TargetNamespace}}"
+  labels:
+    kubemirror.raczylo.com/enabled: "true"
+    example: "template-transform"
+data:
+  API_URL: "https://default.api.example.com"
+  NAMESPACE_UPPER: "DEFAULT"
+
+---
+# Example 3: Merge Transformation
+# Adds environment-specific labels to mirrored ConfigMaps
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config-merge
+  namespace: namespace-1
+  annotations:
+    kubemirror.raczylo.com/sync: "true"
+    kubemirror.raczylo.com/target-namespaces: "namespace-2,namespace-3"
+    kubemirror.raczylo.com/transform: |
+      rules:
+        - path: metadata.labels
+          merge:
+            environment: "production"
+            managed-by: "kubemirror"
+  labels:
+    kubemirror.raczylo.com/enabled: "true"
+    app: "myapp"
+    example: "merge-transform"
+data:
+  config: "value"
+
+---
+# Example 4: Delete Transformation
+# Removes sensitive debug fields from mirrors
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config-delete
+  namespace: namespace-1
+  annotations:
+    kubemirror.raczylo.com/sync: "true"
+    kubemirror.raczylo.com/target-namespaces: "namespace-2,namespace-3"
+    kubemirror.raczylo.com/transform: |
+      rules:
+        - path: data.DEBUG_MODE
+          delete: true
+        - path: data.INTERNAL_API_KEY
+          delete: true
+  labels:
+    kubemirror.raczylo.com/enabled: "true"
+    example: "delete-transform"
+data:
+  DEBUG_MODE: "true"
+  INTERNAL_API_KEY: "secret-key"
+  PUBLIC_CONFIG: "safe-value"
+
+---
+# Example 5: Multi-Rule Complex Transformation
+# Combines value, template, merge, and delete operations
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config-complex
+  namespace: namespace-1
+  annotations:
+    kubemirror.raczylo.com/sync: "true"
+    kubemirror.raczylo.com/target-namespaces: "namespace-2,namespace-3,namespace-4"
+    kubemirror.raczylo.com/transform: |
+      rules:
+        # Set log level to error in production mirrors
+        - path: data.LOG_LEVEL
+          value: "error"
+
+        # Create namespace-specific database URL
+        - path: data.DATABASE_URL
+          template: "postgres://{{.TargetNamespace}}.db.svc.cluster.local:5432/app"
+
+        # Create namespace-specific cache prefix
+        - path: data.CACHE_PREFIX
+          template: "{{replace .TargetNamespace \"-\" \"_\"}}"
+
+        # Add environment labels
+        - path: metadata.labels
+          merge:
+            environment: "production"
+            tier: "backend"
+
+        # Remove debug configurations
+        - path: data.DEBUG_MODE
+          delete: true
+
+        # Remove development API keys
+        - path: data.DEV_API_KEY
+          delete: true
+  labels:
+    kubemirror.raczylo.com/enabled: "true"
+    app: "complex-app"
+    example: "multi-rule-transform"
+data:
+  LOG_LEVEL: "debug"
+  DATABASE_URL: "postgres://localhost:5432/app"
+  CACHE_PREFIX: "dev"
+  DEBUG_MODE: "true"
+  DEV_API_KEY: "dev-key-12345"
+  APP_NAME: "my-app"
+
+---
+# Example 6: Template Functions Showcase
+# Demonstrates all available template functions
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config-functions
+  namespace: namespace-1
+  annotations:
+    kubemirror.raczylo.com/sync: "true"
+    kubemirror.raczylo.com/target-namespaces: "namespace-2"
+    kubemirror.raczylo.com/transform: |
+      rules:
+        # String manipulation
+        - path: data.UPPER_NAMESPACE
+          template: "{{upper .TargetNamespace}}"
+
+        - path: data.LOWER_NAMESPACE
+          template: "{{lower .TargetNamespace}}"
+
+        - path: data.TRIMMED_PREFIX
+          template: "{{trimPrefix .TargetNamespace \"namespace-\"}}"
+
+        - path: data.REPLACED_DASH
+          template: "{{replace .TargetNamespace \"-\" \"_\"}}"
+
+        # Default value for missing field
+        - path: data.WITH_DEFAULT
+          template: "{{default \"fallback-value\" .OptionalField}}"
+  labels:
+    kubemirror.raczylo.com/enabled: "true"
+    example: "template-functions"
+data:
+  placeholder: "will-be-replaced"
+
+---
+# Example 7: Strict Mode Transformation
+# Transformation errors will block mirroring
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config-strict
+  namespace: namespace-1
+  annotations:
+    kubemirror.raczylo.com/sync: "true"
+    kubemirror.raczylo.com/target-namespaces: "namespace-2"
+    kubemirror.raczylo.com/transform-strict: "true"
+    kubemirror.raczylo.com/transform: |
+      rules:
+        - path: data.CRITICAL_VALUE
+          value: "must-succeed"
+  labels:
+    kubemirror.raczylo.com/enabled: "true"
+    example: "strict-mode"
+data:
+  CRITICAL_VALUE: "default"
+
+---
+# Example 8: Namespace Pattern - Environment-Specific Configuration
+# Apply different GraphQL hosts based on namespace patterns
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config-pattern
+  namespace: namespace-1
+  annotations:
+    kubemirror.raczylo.com/sync: "true"
+    kubemirror.raczylo.com/target-namespaces: "preprod-api,preprod-worker,prod-api,staging-api"
+    kubemirror.raczylo.com/transform: |
+      rules:
+        # Preprod environments get preprod GraphQL endpoint
+        - path: data.GRAPHQL_HOST
+          value: "https://preprod.example.com/v1/graphql"
+          namespacePattern: "preprod-*"
+
+        # Production environments get production endpoint
+        - path: data.GRAPHQL_HOST
+          value: "https://api.example.com/v1/graphql"
+          namespacePattern: "prod-*"
+
+        # Staging environments get staging endpoint
+        - path: data.GRAPHQL_HOST
+          value: "https://staging.example.com/v1/graphql"
+          namespacePattern: "*-staging"
+  labels:
+    kubemirror.raczylo.com/enabled: "true"
+    example: "namespace-pattern"
+data:
+  GRAPHQL_HOST: "https://default.example.com/v1/graphql"
+  APP_NAME: "my-app"
+
+---
+# Example 9: Namespace Pattern with Templates
+# Combine patterns with template-based transformations
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config-pattern-template
+  namespace: namespace-1
+  annotations:
+    kubemirror.raczylo.com/sync: "true"
+    kubemirror.raczylo.com/target-namespaces: "preprod-api,preprod-worker,prod-api,prod-worker"
+    kubemirror.raczylo.com/transform: |
+      rules:
+        # Preprod: low log level
+        - path: data.LOG_LEVEL
+          value: "debug"
+          namespacePattern: "preprod-*"
+
+        # Production: high log level
+        - path: data.LOG_LEVEL
+          value: "error"
+          namespacePattern: "prod-*"
+
+        # All preprod: namespace-specific database URL
+        - path: data.DATABASE_URL
+          template: "postgres://{{.TargetNamespace}}.db.preprod.example.com:5432/mydb"
+          namespacePattern: "preprod-*"
+
+        # All prod: namespace-specific database URL
+        - path: data.DATABASE_URL
+          template: "postgres://{{.TargetNamespace}}.db.prod.example.com:5432/mydb"
+          namespacePattern: "prod-*"
+  labels:
+    kubemirror.raczylo.com/enabled: "true"
+    example: "pattern-with-template"
+data:
+  LOG_LEVEL: "info"
+  DATABASE_URL: "postgres://localhost:5432/mydb"
+
+---
+# Example 10: Complex Multi-Pattern Rules
+# Multiple patterns with different transformations
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config-multipattern
+  namespace: namespace-1
+  annotations:
+    kubemirror.raczylo.com/sync: "true"
+    kubemirror.raczylo.com/target-namespaces: "namespace-2,namespace-3,preprod-api,prod-api"
+    kubemirror.raczylo.com/transform: |
+      rules:
+        # Global rule (no pattern) - applies to ALL namespaces
+        - path: data.APP_NAME
+          value: "universal-app"
+
+        # Only for numbered namespaces (namespace-2, namespace-3)
+        - path: data.ENVIRONMENT
+          value: "development"
+          namespacePattern: "namespace-?"
+
+        # Only for preprod environments
+        - path: data.ENVIRONMENT
+          value: "preproduction"
+          namespacePattern: "preprod-*"
+
+        # Only for production environments
+        - path: data.ENVIRONMENT
+          value: "production"
+          namespacePattern: "prod-*"
+
+        # Add security label only to production
+        - path: metadata.labels
+          merge:
+            security-tier: "high"
+            compliance: "required"
+          namespacePattern: "prod-*"
+  labels:
+    kubemirror.raczylo.com/enabled: "true"
+    example: "multi-pattern"
+data:
+  APP_NAME: "default-app"
+  ENVIRONMENT: "unknown"

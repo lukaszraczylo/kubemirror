@@ -13,10 +13,12 @@ import (
 
 	"github.com/lukaszraczylo/kubemirror/pkg/constants"
 	"github.com/lukaszraczylo/kubemirror/pkg/hash"
+	"github.com/lukaszraczylo/kubemirror/pkg/transformer"
 )
 
 // CreateMirror creates a mirror resource in the target namespace.
 // It copies the source resource's spec/data and adds ownership annotations.
+// If transformation rules are present, they are applied to the mirror.
 func CreateMirror(source runtime.Object, targetNamespace string) (runtime.Object, error) {
 	// Compute content hash of source
 	sourceHash, err := hash.ComputeContentHash(source)
@@ -24,16 +26,29 @@ func CreateMirror(source runtime.Object, targetNamespace string) (runtime.Object
 		return nil, fmt.Errorf("failed to compute source hash: %w", err)
 	}
 
-	// Handle typed resources
+	// Create the mirror based on type
+	var mirror runtime.Object
 	switch src := source.(type) {
 	case *corev1.Secret:
-		return createSecretMirror(src, targetNamespace, sourceHash)
+		mirror, err = createSecretMirror(src, targetNamespace, sourceHash)
 	case *corev1.ConfigMap:
-		return createConfigMapMirror(src, targetNamespace, sourceHash)
+		mirror, err = createConfigMapMirror(src, targetNamespace, sourceHash)
 	default:
 		// For unstructured/CRD resources
-		return createUnstructuredMirror(source, targetNamespace, sourceHash)
+		mirror, err = createUnstructuredMirror(source, targetNamespace, sourceHash)
 	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply transformations if rules are present
+	mirror, err = applyTransformations(source, mirror, targetNamespace)
+	if err != nil {
+		return nil, fmt.Errorf("transformation failed: %w", err)
+	}
+
+	return mirror, nil
 }
 
 // createSecretMirror creates a mirror of a Secret.
@@ -165,6 +180,7 @@ func buildMirrorAnnotations(source runtime.Object, sourceHash string) map[string
 }
 
 // UpdateMirror updates an existing mirror with new source content.
+// It also applies transformations if transformation rules are present in the source.
 func UpdateMirror(mirror, source runtime.Object) error {
 	// Compute new source hash
 	sourceHash, err := hash.ComputeContentHash(source)
@@ -186,10 +202,75 @@ func UpdateMirror(mirror, source runtime.Object) error {
 		updateMirrorAnnotations(m, source, sourceHash)
 	default:
 		// Unstructured
-		return updateUnstructuredMirror(mirror, source, sourceHash)
+		if err := updateUnstructuredMirror(mirror, source, sourceHash); err != nil {
+			return err
+		}
 	}
 
+	// Apply transformations after updating data (only if transformation rules exist)
+	mirrorObj, _ := mirror.(metav1.Object)
+	targetNamespace := mirrorObj.GetNamespace()
+	transformed, err := applyTransformations(source, mirror, targetNamespace)
+	if err != nil {
+		return fmt.Errorf("transformation failed: %w", err)
+	}
+
+	// Copy transformed data back to mirror if transformation was applied
+	// Transformer returns unstructured when transformations are applied, original type otherwise
+	if transformedU, ok := transformed.(*unstructured.Unstructured); ok {
+		// Transformation was applied, copy data back to typed mirror
+		switch m := mirror.(type) {
+		case *corev1.Secret:
+			if data, found, _ := unstructured.NestedMap(transformedU.Object, "data"); found {
+				m.Data = convertToByteMap(data)
+			}
+			// Copy potentially transformed labels and annotations
+			m.SetLabels(transformedU.GetLabels())
+			m.SetAnnotations(transformedU.GetAnnotations())
+		case *corev1.ConfigMap:
+			if data, found, _ := unstructured.NestedMap(transformedU.Object, "data"); found {
+				m.Data = convertToStringMap(data)
+			}
+			if binData, found, _ := unstructured.NestedMap(transformedU.Object, "binaryData"); found {
+				m.BinaryData = convertToByteMap(binData)
+			}
+			// Copy potentially transformed labels and annotations
+			m.SetLabels(transformedU.GetLabels())
+			m.SetAnnotations(transformedU.GetAnnotations())
+		case *unstructured.Unstructured:
+			// For unstructured, the transformation is already applied in-place
+			m.Object = transformedU.Object
+		}
+	}
+	// If transformed is not unstructured, no transformation was applied (no rules)
+	// and we can just use the mirror as-is
+
 	return nil
+}
+
+// convertToStringMap converts map[string]interface{} to map[string]string.
+func convertToStringMap(data map[string]interface{}) map[string]string {
+	result := make(map[string]string)
+	for k, v := range data {
+		if s, ok := v.(string); ok {
+			result[k] = s
+		}
+	}
+	return result
+}
+
+// convertToByteMap converts map[string]interface{} to map[string][]byte.
+func convertToByteMap(data map[string]interface{}) map[string][]byte {
+	result := make(map[string][]byte)
+	for k, v := range data {
+		switch val := v.(type) {
+		case string:
+			result[k] = []byte(val)
+		case []byte:
+			result[k] = val
+		}
+	}
+	return result
 }
 
 // updateMirrorAnnotations updates the ownership annotations on a mirror.
@@ -274,4 +355,53 @@ func GetSourceReference(mirror metav1.Object) (namespace, name, uid string, foun
 	}
 
 	return namespace, name, uid, true
+}
+
+// applyTransformations applies transformation rules from the source to the mirror.
+// Returns the transformed mirror, or the original mirror if no rules are present.
+func applyTransformations(source, mirror runtime.Object, targetNamespace string) (runtime.Object, error) {
+	// Build transformation context
+	ctx := buildTransformContext(source, mirror, targetNamespace)
+
+	// Create transformer with default options
+	t := transformer.NewDefaultTransformer()
+
+	// Apply transformations (transformer handles case of no rules gracefully)
+	transformed, err := t.Transform(mirror, ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return transformed, nil
+}
+
+// buildTransformContext creates a transformation context from source and mirror metadata.
+func buildTransformContext(source, mirror runtime.Object, targetNamespace string) transformer.TransformContext {
+	sourceObj, _ := source.(metav1.Object)
+	mirrorObj, _ := mirror.(metav1.Object)
+
+	ctx := transformer.TransformContext{
+		TargetNamespace: targetNamespace,
+		SourceNamespace: sourceObj.GetNamespace(),
+		SourceName:      sourceObj.GetName(),
+		TargetName:      mirrorObj.GetName(),
+	}
+
+	// Copy labels (if any)
+	if labels := sourceObj.GetLabels(); labels != nil {
+		ctx.Labels = make(map[string]string)
+		for k, v := range labels {
+			ctx.Labels[k] = v
+		}
+	}
+
+	// Copy annotations (if any)
+	if annotations := sourceObj.GetAnnotations(); annotations != nil {
+		ctx.Annotations = make(map[string]string)
+		for k, v := range annotations {
+			ctx.Annotations[k] = v
+		}
+	}
+
+	return ctx
 }

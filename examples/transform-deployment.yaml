@@ -1,0 +1,249 @@
+# Array Indexing Transformation Examples for KubeMirror
+# Demonstrates transformation rules on Kubernetes Deployments with containers, env vars, etc.
+
+---
+# Example 1: Transform Container Image with Namespace-Specific Registry
+# Changes the image for the first container to use a namespace-specific registry
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-app
+  namespace: namespace-1
+  labels:
+    kubemirror.raczylo.com/enabled: "true"
+    app: web-app
+  annotations:
+    kubemirror.raczylo.com/sync: "true"
+    kubemirror.raczylo.com/target-namespaces: "namespace-2,namespace-3"
+    kubemirror.raczylo.com/transform: |
+      rules:
+        # Update container image to use namespace-specific registry
+        - path: spec.template.spec.containers[0].image
+          template: "registry.{{.TargetNamespace}}.example.com/web-app:v1.0.0"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web-app
+  template:
+    metadata:
+      labels:
+        app: web-app
+    spec:
+      containers:
+        - name: web
+          image: web-app:latest
+          ports:
+            - containerPort: 8080
+
+---
+# Example 2: Transform Environment Variables
+# Changes specific environment variables in containers
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-service
+  namespace: namespace-1
+  labels:
+    kubemirror.raczylo.com/enabled: "true"
+  annotations:
+    kubemirror.raczylo.com/sync: "true"
+    kubemirror.raczylo.com/target-namespaces: "namespace-2,namespace-3,namespace-4"
+    kubemirror.raczylo.com/transform: |
+      rules:
+        # Set LOG_LEVEL env var to error for production
+        - path: spec.template.spec.containers[0].env[0].value
+          value: "error"
+
+        # Set DATABASE_URL to namespace-specific database
+        - path: spec.template.spec.containers[0].env[1].value
+          template: "postgres://{{.TargetNamespace}}-db.postgres.svc.cluster.local:5432/api"
+
+        # Set API_KEY_PREFIX with namespace identifier
+        - path: spec.template.spec.containers[0].env[2].value
+          template: "{{upper (replace .TargetNamespace \"-\" \"_\")}}"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api-service
+  template:
+    metadata:
+      labels:
+        app: api-service
+    spec:
+      containers:
+        - name: api
+          image: api-service:v2.0.0
+          env:
+            - name: LOG_LEVEL
+              value: "debug"
+            - name: DATABASE_URL
+              value: "postgres://localhost:5432/api"
+            - name: API_KEY_PREFIX
+              value: "DEV"
+            - name: SERVICE_NAME
+              value: "api-service"
+
+---
+# Example 3: Transform Multiple Containers
+# Handles deployments with multiple containers (app + sidecar)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-with-sidecar
+  namespace: namespace-1
+  labels:
+    kubemirror.raczylo.com/enabled: "true"
+  annotations:
+    kubemirror.raczylo.com/sync: "true"
+    kubemirror.raczylo.com/target-namespaces: "namespace-2"
+    kubemirror.raczylo.com/transform: |
+      rules:
+        # Main application container - update image
+        - path: spec.template.spec.containers[0].image
+          template: "{{.TargetNamespace}}.registry.example.com/app:v1"
+
+        # Main application container - set environment
+        - path: spec.template.spec.containers[0].env[0].value
+          template: "{{.TargetNamespace}}"
+
+        # Sidecar container - update image
+        - path: spec.template.spec.containers[1].image
+          value: "logging-sidecar:stable"
+
+        # Sidecar container - configure log destination
+        - path: spec.template.spec.containers[1].env[0].value
+          template: "https://logs.{{.TargetNamespace}}.example.com/ingest"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: app-with-sidecar
+  template:
+    metadata:
+      labels:
+        app: app-with-sidecar
+    spec:
+      containers:
+        - name: app
+          image: app:latest
+          env:
+            - name: ENVIRONMENT
+              value: "development"
+        - name: log-collector
+          image: logging-sidecar:latest
+          env:
+            - name: LOG_ENDPOINT
+              value: "https://logs.dev.example.com/ingest"
+
+---
+# Example 4: Transform Volume Mounts and ConfigMap References
+# Updates volume configurations for namespace-specific resources
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: config-consumer
+  namespace: namespace-1
+  labels:
+    kubemirror.raczylo.com/enabled: "true"
+  annotations:
+    kubemirror.raczylo.com/sync: "true"
+    kubemirror.raczylo.com/target-namespaces: "namespace-2,namespace-3"
+    kubemirror.raczylo.com/transform: |
+      rules:
+        # Update ConfigMap name reference in volume
+        - path: spec.template.spec.volumes[0].configMap.name
+          template: "{{.TargetNamespace}}-config"
+
+        # Update Secret name reference in volume
+        - path: spec.template.spec.volumes[1].secret.secretName
+          template: "{{.TargetNamespace}}-credentials"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: config-consumer
+  template:
+    metadata:
+      labels:
+        app: config-consumer
+    spec:
+      containers:
+        - name: app
+          image: app:v1
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/config
+            - name: secret-volume
+              mountPath: /etc/secrets
+      volumes:
+        - name: config-volume
+          configMap:
+            name: app-config
+        - name: secret-volume
+          secret:
+            secretName: app-credentials
+
+---
+# Example 5: Complex Nested Array Transformations
+# Demonstrates deeply nested path access in complex structures
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: complex-app
+  namespace: namespace-1
+  labels:
+    kubemirror.raczylo.com/enabled: "true"
+  annotations:
+    kubemirror.raczylo.com/sync: "true"
+    kubemirror.raczylo.com/target-namespaces: "namespace-2"
+    kubemirror.raczylo.com/transform: |
+      rules:
+        # Container image
+        - path: spec.template.spec.containers[0].image
+          template: "{{.TargetNamespace}}.registry.io/app:v1"
+
+        # Nested env var value (REDIS_HOST)
+        - path: spec.template.spec.containers[0].env[1].value
+          template: "redis.{{.TargetNamespace}}.svc.cluster.local"
+
+        # Resource limits
+        - path: spec.template.spec.containers[0].resources.limits.memory
+          value: "2Gi"
+
+        # Init container image
+        - path: spec.template.spec.initContainers[0].image
+          value: "init-db:stable"
+
+        # Init container env var
+        - path: spec.template.spec.initContainers[0].env[0].value
+          template: "{{.TargetNamespace}}-database"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: complex-app
+  template:
+    metadata:
+      labels:
+        app: complex-app
+    spec:
+      initContainers:
+        - name: init-db
+          image: init-db:latest
+          env:
+            - name: DB_NAME
+              value: "default-database"
+      containers:
+        - name: app
+          image: app:dev
+          env:
+            - name: APP_NAME
+              value: "complex-app"
+            - name: REDIS_HOST
+              value: "localhost"
+          resources:
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"

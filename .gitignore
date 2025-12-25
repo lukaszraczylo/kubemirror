@@ -19,7 +19,6 @@ go.work
 # Build output
 bin/
 dist/
-kubemirror
 /kubemirror
 
 # IDE

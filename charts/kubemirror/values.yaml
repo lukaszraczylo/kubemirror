@@ -1,0 +1,86 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/lukaszraczylo/kubemirror
+  pullPolicy: IfNotPresent
+  tag: "0.1.0"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop:
+      - ALL
+
+controller:
+  # Metrics and health endpoints
+  metricsBindAddress: ":8080"
+  healthProbeBindAddress: ":8081"
+
+  # Leader election
+  leaderElect: true
+  leaderElectionID: "kubemirror-controller-leader"
+
+  # Resource types to mirror
+  # Examples: ["Secret.v1", "ConfigMap.v1", "Ingress.v1.networking.k8s.io"]
+  # If empty, auto-discovery will find all mirrorable resources
+  resourceTypes: []
+
+  # Auto-discovery interval (only used when resourceTypes is empty)
+  # How often to rediscover available resources in the cluster
+  discoveryInterval: "5m"
+
+  # Resource limits
+  maxTargets: 100
+  workerThreads: 5
+
+  # API rate limiting
+  rateLimitQPS: 50.0
+  rateLimitBurst: 100
+
+  # Namespace filtering
+  excludedNamespaces: ""
+  includedNamespaces: ""
+
+service:
+  type: ClusterIP
+  metricsPort: 8080
+  healthPort: 8081
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+priorityClassName: ""

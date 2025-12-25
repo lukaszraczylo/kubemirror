@@ -66,3 +66,26 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           gh api repos/lukaszraczylo/helm-charts/dispatches             -f event_type=release-chart             -f client_payload[chart_name]=kubemirror             -f client_payload[version]="$RELEASE_VERSION"             -f client_payload[source_repo]=lukaszraczylo/kubemirror             -f client_payload[chart_path]=charts/kubemirror
+
+  publish-website:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './docs'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,813 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>KubeMirror - Copy Kubernetes Resources Across Namespaces</title>
+        <meta
+            name="description"
+            content="Copy Secrets, ConfigMaps, and any Custom Resource across Kubernetes namespaces automatically. Transform values per environment. Better replacement for Reflector."
+        />
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link
+            rel="stylesheet"
+            href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
+        />
+        <style>
+            .gradient-text {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-clip: text;
+            }
+            .glass {
+                background: rgba(255, 255, 255, 0.1);
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+            }
+            .hover-lift {
+                transition: transform 0.3s ease, box-shadow 0.3s ease;
+            }
+            .hover-lift:hover {
+                transform: translateY(-5px);
+                box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            }
+            .code-block {
+                background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            }
+        </style>
+    </head>
+    <body class="bg-gradient-to-br from-slate-50 to-blue-50">
+        <!-- Navigation -->
+        <nav class="bg-white/80 backdrop-blur-md shadow-lg sticky top-0 z-50 border-b border-blue-100">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between h-16 items-center">
+                    <a href="#" class="flex items-center gap-3 group">
+                        <div class="bg-gradient-to-br from-blue-500 to-purple-600 p-2 rounded-lg group-hover:scale-110 transition-transform">
+                            <i class="fas fa-copy text-2xl text-white"></i>
+                        </div>
+                        <span class="text-2xl font-bold gradient-text">KubeMirror</span>
+                    </a>
+                    <div class="hidden md:flex space-x-8">
+                        <a href="#problem" class="text-slate-700 hover:text-blue-600 font-medium transition-colors">Problem</a>
+                        <a href="#features" class="text-slate-700 hover:text-blue-600 font-medium transition-colors">Features</a>
+                        <a href="#examples" class="text-slate-700 hover:text-blue-600 font-medium transition-colors">Examples</a>
+                        <a href="#comparison" class="text-slate-700 hover:text-blue-600 font-medium transition-colors">Compare</a>
+                        <a href="#installation" class="text-slate-700 hover:text-blue-600 font-medium transition-colors">Install</a>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <a href="https://github.com/lukaszraczylo/kubemirror" target="_blank" class="text-slate-700 hover:text-blue-600 transition-colors">
+                            <i class="fab fa-github text-2xl"></i>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Hero Section -->
+        <section class="relative overflow-hidden py-24">
+            <div class="absolute inset-0 bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 opacity-70"></div>
+            <div class="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+                <div class="mb-8 inline-block">
+                    <div class="bg-gradient-to-br from-blue-500 to-purple-600 p-6 rounded-2xl shadow-2xl">
+                        <i class="fas fa-copy text-7xl text-white"></i>
+                    </div>
+                </div>
+                <h1 class="text-6xl font-extrabold text-slate-900 mb-6 leading-tight">
+                    Copy Kubernetes Resources<br/>
+                    <span class="gradient-text">Across Namespaces</span>
+                </h1>
+                <p class="text-2xl text-slate-600 mb-10 max-w-3xl mx-auto leading-relaxed">
+                    Share Secrets, ConfigMaps, and any Custom Resource (like Traefik Middleware, Cert-Manager Certificates) across multiple namespaces.
+                    <strong>Automatically keep them in sync.</strong> Transform values per environment.
+                </p>
+                <div class="flex justify-center gap-6">
+                    <a href="#installation" class="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-10 py-4 rounded-xl font-bold text-lg hover:from-blue-700 hover:to-purple-700 transition-all shadow-lg hover:shadow-xl hover:scale-105">
+                        <i class="fas fa-download mr-2"></i>
+                        Get Started
+                    </a>
+                    <a href="https://github.com/lukaszraczylo/kubemirror" target="_blank" class="bg-white text-slate-700 px-10 py-4 rounded-xl font-bold text-lg border-2 border-slate-300 hover:border-blue-500 hover:text-blue-600 transition-all shadow-lg hover:shadow-xl hover:scale-105">
+                        <i class="fab fa-github mr-2"></i>
+                        GitHub
+                    </a>
+                </div>
+            </div>
+        </section>
+
+        <!-- The Problem Section -->
+        <section id="problem" class="py-24 bg-white">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="text-center mb-16">
+                    <h2 class="text-5xl font-extrabold text-slate-900 mb-6">The Problem</h2>
+                    <p class="text-2xl text-slate-600 max-w-4xl mx-auto">
+                        Kubernetes doesn't let you share resources across namespaces. You need the same Secret or ConfigMap in 10 namespaces? You have to duplicate it manually and keep them all in sync.
+                    </p>
+                </div>
+
+                <div class="grid md:grid-cols-3 gap-8 mb-16">
+                    <div class="bg-gradient-to-br from-red-50 to-red-100 border-l-4 border-red-500 p-8 rounded-lg shadow-lg hover-lift">
+                        <div class="flex items-center mb-4">
+                            <i class="fas fa-times-circle text-red-500 text-3xl mr-3"></i>
+                            <h3 class="font-bold text-xl text-slate-900">Manual Duplication</h3>
+                        </div>
+                        <p class="text-slate-700 leading-relaxed">
+                            Copy-paste the same TLS certificate Secret into 20 namespaces. Update it manually in all 20 when it expires.
+                        </p>
+                    </div>
+
+                    <div class="bg-gradient-to-br from-orange-50 to-orange-100 border-l-4 border-orange-500 p-8 rounded-lg shadow-lg hover-lift">
+                        <div class="flex items-center mb-4">
+                            <i class="fas fa-times-circle text-orange-500 text-3xl mr-3"></i>
+                            <h3 class="font-bold text-xl text-slate-900">Environment Hardcoding</h3>
+                        </div>
+                        <p class="text-slate-700 leading-relaxed">
+                            Same ConfigMap but with different API URLs for dev, staging, prod? Create 3 separate versions and maintain them.
+                        </p>
+                    </div>
+
+                    <div class="bg-gradient-to-br from-yellow-50 to-yellow-100 border-l-4 border-yellow-600 p-8 rounded-lg shadow-lg hover-lift">
+                        <div class="flex items-center mb-4">
+                            <i class="fas fa-times-circle text-yellow-600 text-3xl mr-3"></i>
+                            <h3 class="font-bold text-xl text-slate-900">Limited Tools</h3>
+                        </div>
+                        <p class="text-slate-700 leading-relaxed">
+                            Existing tools only support Secrets/ConfigMaps. Want to share Traefik Middleware? Out of luck.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="bg-gradient-to-br from-green-50 to-emerald-100 border-l-4 border-green-500 p-10 rounded-xl shadow-xl">
+                    <div class="flex items-start gap-4">
+                        <i class="fas fa-check-circle text-green-500 text-4xl mt-1"></i>
+                        <div>
+                            <h3 class="font-bold text-3xl text-slate-900 mb-4">KubeMirror's Solution</h3>
+                            <p class="text-slate-700 text-xl leading-relaxed">
+                                Define your resource once in a source namespace. KubeMirror automatically copies it to all target namespaces and keeps them synchronized.
+                                Transform values per environment (e.g., <code class="bg-white px-3 py-1 rounded font-mono text-purple-600 font-semibold">preprod-*</code> namespaces get preprod API URLs, <code class="bg-white px-3 py-1 rounded font-mono text-purple-600 font-semibold">prod-*</code> get production URLs).
+                                Works with any Kubernetes resource type.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Features Section -->
+        <section id="features" class="py-24 bg-gradient-to-br from-slate-50 to-blue-50">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="text-center mb-20">
+                    <h2 class="text-5xl font-extrabold text-slate-900 mb-4">Key Features</h2>
+                    <p class="text-xl text-slate-600">Everything you need for resource mirroring and synchronization</p>
+                </div>
+
+                <div class="grid md:grid-cols-2 gap-10">
+                    <!-- Any Resource Type -->
+                    <div class="bg-white p-10 rounded-2xl shadow-xl hover-lift border border-blue-100">
+                        <div class="bg-gradient-to-br from-blue-500 to-purple-600 w-16 h-16 rounded-xl flex items-center justify-center mb-6">
+                            <i class="fas fa-layer-group text-3xl text-white"></i>
+                        </div>
+                        <h3 class="text-3xl font-bold text-slate-900 mb-4">Mirror Any Resource Type</h3>
+                        <p class="text-slate-600 mb-6 text-lg">
+                            Not just Secrets and ConfigMaps. Mirror any namespaced Kubernetes resource:
+                        </p>
+                        <ul class="text-slate-700 space-y-3 text-lg">
+                            <li><i class="fas fa-check-circle text-green-500 mr-3"></i>Secrets & ConfigMaps (obviously)</li>
+                            <li><i class="fas fa-check-circle text-green-500 mr-3"></i>Traefik Middleware, IngressRoute</li>
+                            <li><i class="fas fa-check-circle text-green-500 mr-3"></i>Cert-Manager Certificates</li>
+                            <li><i class="fas fa-check-circle text-green-500 mr-3"></i>Any Custom Resource Definition (CRD)</li>
+                        </ul>
+                        <div class="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                            <p class="text-sm text-slate-600">
+                                <strong class="text-blue-700">How:</strong> KubeMirror discovers all available resource types automatically. No manual configuration needed.
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Transformation Rules -->
+                    <div class="bg-white p-10 rounded-2xl shadow-xl hover-lift border border-purple-100">
+                        <div class="bg-gradient-to-br from-purple-500 to-pink-600 w-16 h-16 rounded-xl flex items-center justify-center mb-6">
+                            <i class="fas fa-magic text-3xl text-white"></i>
+                        </div>
+                        <h3 class="text-3xl font-bold text-slate-900 mb-4">Transform Per Environment</h3>
+                        <p class="text-slate-600 mb-6 text-lg">
+                            Change values automatically based on target namespace:
+                        </p>
+                        <div class="code-block text-gray-100 p-5 rounded-xl font-mono text-sm overflow-x-auto mb-4 shadow-lg">
+<pre class="text-green-400"># Preprod namespaces get preprod API</pre>
+<pre><span class="text-yellow-400">- path:</span> data.API_URL
+  <span class="text-yellow-400">value:</span> <span class="text-blue-400">"https://preprod.api.com"</span>
+  <span class="text-yellow-400">namespacePattern:</span> <span class="text-blue-400">"preprod-*"</span>
+
+<span class="text-green-400"># Production gets production API</span>
+<span class="text-yellow-400">- path:</span> data.API_URL
+  <span class="text-yellow-400">value:</span> <span class="text-blue-400">"https://api.com"</span>
+  <span class="text-yellow-400">namespacePattern:</span> <span class="text-blue-400">"prod-*"</span></pre>
+                        </div>
+                        <div class="p-4 bg-purple-50 rounded-lg border border-purple-200">
+                            <p class="text-sm text-slate-600">
+                                <strong class="text-purple-700">Why:</strong> One source ConfigMap, different values per environment. No manual maintenance.
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Automatic Sync -->
+                    <div class="bg-white p-10 rounded-2xl shadow-xl hover-lift border border-green-100">
+                        <div class="bg-gradient-to-br from-green-500 to-teal-600 w-16 h-16 rounded-xl flex items-center justify-center mb-6">
+                            <i class="fas fa-sync-alt text-3xl text-white"></i>
+                        </div>
+                        <h3 class="text-3xl font-bold text-slate-900 mb-4">Automatic Synchronization</h3>
+                        <p class="text-slate-600 mb-6 text-lg">
+                            Update the source once. All copies update automatically:
+                        </p>
+                        <ul class="text-slate-700 space-y-3 text-lg">
+                            <li><i class="fas fa-arrow-right text-blue-500 mr-3"></i>Update source Secret → All 50 copies update</li>
+                            <li><i class="fas fa-arrow-right text-blue-500 mr-3"></i>Delete source → All copies get deleted</li>
+                            <li><i class="fas fa-arrow-right text-blue-500 mr-3"></i>Someone deletes a copy → Recreated automatically</li>
+                            <li><i class="fas fa-arrow-right text-blue-500 mr-3"></i>New namespace created → Copy appears automatically</li>
+                        </ul>
+                        <div class="mt-6 p-4 bg-green-50 rounded-lg border border-green-200">
+                            <p class="text-sm text-slate-600">
+                                <strong class="text-green-700">How:</strong> Uses SHA256 content hashing + Kubernetes generation tracking. Only updates when content actually changes.
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Smart Targeting -->
+                    <div class="bg-white p-10 rounded-2xl shadow-xl hover-lift border border-orange-100">
+                        <div class="bg-gradient-to-br from-orange-500 to-red-600 w-16 h-16 rounded-xl flex items-center justify-center mb-6">
+                            <i class="fas fa-bullseye text-3xl text-white"></i>
+                        </div>
+                        <h3 class="text-3xl font-bold text-slate-900 mb-4">Flexible Targeting</h3>
+                        <p class="text-slate-600 mb-6 text-lg">
+                            Choose which namespaces receive the copy:
+                        </p>
+                        <div class="space-y-4 text-slate-700 text-lg">
+                            <div class="flex items-center gap-3">
+                                <code class="bg-slate-100 px-4 py-2 rounded-lg font-mono text-purple-700 font-semibold">namespace-1,namespace-2</code>
+                                <span>Specific namespaces</span>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <code class="bg-slate-100 px-4 py-2 rounded-lg font-mono text-purple-700 font-semibold">app-*,prod-*</code>
+                                <span>Pattern matching</span>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <code class="bg-slate-100 px-4 py-2 rounded-lg font-mono text-purple-700 font-semibold">all-labeled</code>
+                                <span>All labeled namespaces</span>
+                            </div>
+                        </div>
+                        <div class="mt-6 p-4 bg-orange-50 rounded-lg border border-orange-200">
+                            <p class="text-sm text-slate-600">
+                                <strong class="text-orange-700">Safety:</strong> Source namespace never receives a copy. Max 100 targets per resource (configurable).
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Examples Section -->
+        <section id="examples" class="py-24 bg-white">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="text-center mb-20">
+                    <h2 class="text-5xl font-extrabold text-slate-900 mb-4">Real-World Examples</h2>
+                    <p class="text-xl text-slate-600">See how easy it is to get started with KubeMirror</p>
+                </div>
+
+                <div class="space-y-12">
+                    <!-- Example 1: Basic Secret -->
+                    <div class="bg-gradient-to-br from-blue-50 to-indigo-50 p-10 rounded-2xl shadow-xl border border-blue-200">
+                        <div class="flex items-start gap-6 mb-6">
+                            <div class="bg-blue-600 w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0">
+                                <span class="text-white font-bold text-2xl">1</span>
+                            </div>
+                            <div>
+                                <h3 class="text-3xl font-bold text-slate-900 mb-3">
+                                    <i class="fas fa-lock text-blue-600 mr-3"></i>
+                                    Basic: Mirror a TLS Secret
+                                </h3>
+                                <p class="text-slate-600 text-lg">Share your TLS certificate across multiple application namespaces</p>
+                            </div>
+                        </div>
+                        <div class="code-block text-gray-100 p-6 rounded-xl font-mono text-sm overflow-x-auto shadow-lg">
+<pre><span class="text-blue-400">apiVersion:</span> v1
+<span class="text-blue-400">kind:</span> Secret
+<span class="text-blue-400">metadata:</span>
+  <span class="text-yellow-400">name:</span> tls-cert
+  <span class="text-yellow-400">namespace:</span> default
+  <span class="text-yellow-400">labels:</span>
+    <span class="text-green-400">kubemirror.raczylo.com/enabled:</span> <span class="text-purple-400">"true"</span>
+  <span class="text-yellow-400">annotations:</span>
+    <span class="text-green-400">kubemirror.raczylo.com/sync:</span> <span class="text-purple-400">"true"</span>
+    <span class="text-green-400">kubemirror.raczylo.com/target-namespaces:</span> <span class="text-purple-400">"app-1,app-2,app-3"</span>
+<span class="text-blue-400">type:</span> kubernetes.io/tls
+<span class="text-blue-400">data:</span>
+  <span class="text-yellow-400">tls.crt:</span> LS0tLS1CRUd...
+  <span class="text-yellow-400">tls.key:</span> LS0tLS1CRUd...</pre>
+                        </div>
+                    </div>
+
+                    <!-- Example 2: Pattern Matching -->
+                    <div class="bg-gradient-to-br from-purple-50 to-pink-50 p-10 rounded-2xl shadow-xl border border-purple-200">
+                        <div class="flex items-start gap-6 mb-6">
+                            <div class="bg-purple-600 w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0">
+                                <span class="text-white font-bold text-2xl">2</span>
+                            </div>
+                            <div>
+                                <h3 class="text-3xl font-bold text-slate-900 mb-3">
+                                    <i class="fas fa-asterisk text-purple-600 mr-3"></i>
+                                    Pattern Matching: Mirror to All App Namespaces
+                                </h3>
+                                <p class="text-slate-600 text-lg">Use wildcards to mirror to all namespaces matching a pattern</p>
+                            </div>
+                        </div>
+                        <div class="code-block text-gray-100 p-6 rounded-xl font-mono text-sm overflow-x-auto shadow-lg">
+<pre><span class="text-blue-400">apiVersion:</span> v1
+<span class="text-blue-400">kind:</span> ConfigMap
+<span class="text-blue-400">metadata:</span>
+  <span class="text-yellow-400">name:</span> common-config
+  <span class="text-yellow-400">namespace:</span> default
+  <span class="text-yellow-400">labels:</span>
+    <span class="text-green-400">kubemirror.raczylo.com/enabled:</span> <span class="text-purple-400">"true"</span>
+  <span class="text-yellow-400">annotations:</span>
+    <span class="text-green-400">kubemirror.raczylo.com/sync:</span> <span class="text-purple-400">"true"</span>
+    <span class="text-pink-400"># Mirror to ALL namespaces starting with "app-"</span>
+    <span class="text-green-400">kubemirror.raczylo.com/target-namespaces:</span> <span class="text-purple-400">"app-*"</span>
+<span class="text-blue-400">data:</span>
+  <span class="text-yellow-400">log_level:</span> <span class="text-purple-400">"info"</span>
+  <span class="text-yellow-400">api_url:</span> <span class="text-purple-400">"https://api.example.com"</span></pre>
+                        </div>
+                        <div class="mt-6 p-5 bg-purple-100 rounded-lg border border-purple-300">
+                            <p class="text-slate-700 text-lg">
+                                <i class="fas fa-info-circle text-purple-600 mr-2"></i>
+                                <strong>Result:</strong> This ConfigMap will be automatically copied to <code class="bg-white px-2 py-1 rounded font-mono text-purple-700">app-frontend</code>, <code class="bg-white px-2 py-1 rounded font-mono text-purple-700">app-backend</code>, <code class="bg-white px-2 py-1 rounded font-mono text-purple-700">app-worker</code>, and any other namespace starting with "app-"
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Example 3: Custom Resource (Traefik) -->
+                    <div class="bg-gradient-to-br from-green-50 to-teal-50 p-10 rounded-2xl shadow-xl border border-green-200">
+                        <div class="flex items-start gap-6 mb-6">
+                            <div class="bg-green-600 w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0">
+                                <span class="text-white font-bold text-2xl">3</span>
+                            </div>
+                            <div>
+                                <h3 class="text-3xl font-bold text-slate-900 mb-3">
+                                    <i class="fas fa-cubes text-green-600 mr-3"></i>
+                                    Custom Resource: Share Traefik Middleware
+                                </h3>
+                                <p class="text-slate-600 text-lg">Mirror any CRD like Traefik Middleware across your cluster</p>
+                            </div>
+                        </div>
+                        <div class="code-block text-gray-100 p-6 rounded-xl font-mono text-sm overflow-x-auto shadow-lg">
+<pre><span class="text-blue-400">apiVersion:</span> traefik.io/v1alpha1
+<span class="text-blue-400">kind:</span> Middleware
+<span class="text-blue-400">metadata:</span>
+  <span class="text-yellow-400">name:</span> compression
+  <span class="text-yellow-400">namespace:</span> infrastructure
+  <span class="text-yellow-400">labels:</span>
+    <span class="text-green-400">kubemirror.raczylo.com/enabled:</span> <span class="text-purple-400">"true"</span>
+  <span class="text-yellow-400">annotations:</span>
+    <span class="text-green-400">kubemirror.raczylo.com/sync:</span> <span class="text-purple-400">"true"</span>
+    <span class="text-pink-400"># Share with all application namespaces</span>
+    <span class="text-green-400">kubemirror.raczylo.com/target-namespaces:</span> <span class="text-purple-400">"app-*,prod-*"</span>
+<span class="text-blue-400">spec:</span>
+  <span class="text-yellow-400">compress:</span>
+    <span class="text-yellow-400">excludedContentTypes:</span>
+      - text/event-stream</pre>
+                        </div>
+                        <div class="mt-6 p-5 bg-green-100 rounded-lg border border-green-300">
+                            <p class="text-slate-700 text-lg">
+                                <i class="fas fa-lightbulb text-green-600 mr-2"></i>
+                                <strong>Works with any CRD:</strong> Cert-Manager Certificates, Gateway API resources, or your own custom resources!
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Example 4: Transformation -->
+                    <div class="bg-gradient-to-br from-orange-50 to-red-50 p-10 rounded-2xl shadow-xl border border-orange-200">
+                        <div class="flex items-start gap-6 mb-6">
+                            <div class="bg-orange-600 w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0">
+                                <span class="text-white font-bold text-2xl">4</span>
+                            </div>
+                            <div>
+                                <h3 class="text-3xl font-bold text-slate-900 mb-3">
+                                    <i class="fas fa-code-branch text-orange-600 mr-3"></i>
+                                    Advanced: Environment-Specific Configuration
+                                </h3>
+                                <p class="text-slate-600 text-lg">Transform values based on target environment using namespace patterns</p>
+                            </div>
+                        </div>
+                        <div class="code-block text-gray-100 p-6 rounded-xl font-mono text-sm overflow-x-auto shadow-lg">
+<pre><span class="text-blue-400">apiVersion:</span> v1
+<span class="text-blue-400">kind:</span> ConfigMap
+<span class="text-blue-400">metadata:</span>
+  <span class="text-yellow-400">name:</span> app-config
+  <span class="text-yellow-400">namespace:</span> default
+  <span class="text-yellow-400">labels:</span>
+    <span class="text-green-400">kubemirror.raczylo.com/enabled:</span> <span class="text-purple-400">"true"</span>
+  <span class="text-yellow-400">annotations:</span>
+    <span class="text-green-400">kubemirror.raczylo.com/sync:</span> <span class="text-purple-400">"true"</span>
+    <span class="text-green-400">kubemirror.raczylo.com/target-namespaces:</span> <span class="text-purple-400">"preprod-api,prod-api,staging-api"</span>
+    <span class="text-green-400">kubemirror.raczylo.com/transform:</span> |
+      <span class="text-yellow-400">rules:</span>
+        <span class="text-pink-400"># Preprod gets preprod GraphQL endpoint</span>
+        - <span class="text-yellow-400">path:</span> data.GRAPHQL_HOST
+          <span class="text-yellow-400">value:</span> <span class="text-purple-400">"https://preprod.example.com/v1/graphql"</span>
+          <span class="text-yellow-400">namespacePattern:</span> <span class="text-purple-400">"preprod-*"</span>
+
+        <span class="text-pink-400"># Production gets production endpoint</span>
+        - <span class="text-yellow-400">path:</span> data.GRAPHQL_HOST
+          <span class="text-yellow-400">value:</span> <span class="text-purple-400">"https://api.example.com/v1/graphql"</span>
+          <span class="text-yellow-400">namespacePattern:</span> <span class="text-purple-400">"prod-*"</span>
+
+        <span class="text-pink-400"># Set log level to error in production</span>
+        - <span class="text-yellow-400">path:</span> data.LOG_LEVEL
+          <span class="text-yellow-400">value:</span> <span class="text-purple-400">"error"</span>
+          <span class="text-yellow-400">namespacePattern:</span> <span class="text-purple-400">"prod-*"</span>
+<span class="text-blue-400">data:</span>
+  <span class="text-yellow-400">GRAPHQL_HOST:</span> <span class="text-purple-400">"https://localhost/v1/graphql"</span>
+  <span class="text-yellow-400">LOG_LEVEL:</span> <span class="text-purple-400">"debug"</span></pre>
+                        </div>
+                        <div class="mt-6 p-5 bg-orange-100 rounded-lg border border-orange-300">
+                            <p class="text-slate-700 text-lg">
+                                <i class="fas fa-magic text-orange-600 mr-2"></i>
+                                <strong>Result:</strong> Each environment gets the right configuration automatically. One source, multiple environments, zero manual work!
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Example 5: Go Templates -->
+                    <div class="bg-gradient-to-br from-pink-50 to-rose-50 p-10 rounded-2xl shadow-xl border border-pink-200">
+                        <div class="flex items-start gap-6 mb-6">
+                            <div class="bg-pink-600 w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0">
+                                <span class="text-white font-bold text-2xl">5</span>
+                            </div>
+                            <div>
+                                <h3 class="text-3xl font-bold text-slate-900 mb-3">
+                                    <i class="fas fa-code text-pink-600 mr-3"></i>
+                                    Go Templates: Dynamic Value Generation
+                                </h3>
+                                <p class="text-slate-600 text-lg">Use Go template functions to generate namespace-specific values dynamically</p>
+                            </div>
+                        </div>
+                        <div class="code-block text-gray-100 p-6 rounded-xl font-mono text-sm overflow-x-auto shadow-lg">
+<pre><span class="text-blue-400">apiVersion:</span> v1
+<span class="text-blue-400">kind:</span> ConfigMap
+<span class="text-blue-400">metadata:</span>
+  <span class="text-yellow-400">name:</span> dynamic-config
+  <span class="text-yellow-400">namespace:</span> default
+  <span class="text-yellow-400">labels:</span>
+    <span class="text-green-400">kubemirror.raczylo.com/enabled:</span> <span class="text-purple-400">"true"</span>
+  <span class="text-yellow-400">annotations:</span>
+    <span class="text-green-400">kubemirror.raczylo.com/sync:</span> <span class="text-purple-400">"true"</span>
+    <span class="text-green-400">kubemirror.raczylo.com/target-namespaces:</span> <span class="text-purple-400">"app-frontend,app-backend,app-worker"</span>
+    <span class="text-green-400">kubemirror.raczylo.com/transform:</span> |
+      <span class="text-yellow-400">rules:</span>
+        <span class="text-pink-400"># Generate namespace-specific API URL</span>
+        - <span class="text-yellow-400">path:</span> data.API_URL
+          <span class="text-yellow-400">template:</span> <span class="text-purple-400">"https://{{.TargetNamespace}}.api.example.com"</span>
+
+        <span class="text-pink-400"># Generate database connection string</span>
+        - <span class="text-yellow-400">path:</span> data.DATABASE_URL
+          <span class="text-yellow-400">template:</span> <span class="text-purple-400">"postgres://{{.TargetNamespace}}.db.svc:5432/app"</span>
+
+        <span class="text-pink-400"># Use string manipulation functions</span>
+        - <span class="text-yellow-400">path:</span> data.CACHE_PREFIX
+          <span class="text-yellow-400">template:</span> <span class="text-purple-400">"{{replace .TargetNamespace \"-\" \"_\"}}"</span>
+
+        <span class="text-pink-400"># Uppercase namespace for environment variable</span>
+        - <span class="text-yellow-400">path:</span> data.NAMESPACE_UPPER
+          <span class="text-yellow-400">template:</span> <span class="text-purple-400">"{{upper .TargetNamespace}}"</span>
+<span class="text-blue-400">data:</span>
+  <span class="text-yellow-400">API_URL:</span> <span class="text-purple-400">"https://localhost:8080"</span>
+  <span class="text-yellow-400">DATABASE_URL:</span> <span class="text-purple-400">"postgres://localhost:5432/app"</span>
+  <span class="text-yellow-400">CACHE_PREFIX:</span> <span class="text-purple-400">"default"</span>
+  <span class="text-yellow-400">NAMESPACE_UPPER:</span> <span class="text-purple-400">"DEFAULT"</span></pre>
+                        </div>
+                        <div class="mt-6 p-5 bg-pink-100 rounded-lg border border-pink-300">
+                            <p class="text-slate-700 text-lg mb-4">
+                                <i class="fas fa-info-circle text-pink-600 mr-2"></i>
+                                <strong>Available Template Variables:</strong>
+                            </p>
+                            <div class="grid md:grid-cols-2 gap-3 text-sm font-mono">
+                                <div><code class="bg-white px-2 py-1 rounded text-pink-700">.TargetNamespace</code> - Target namespace name</div>
+                                <div><code class="bg-white px-2 py-1 rounded text-pink-700">.SourceNamespace</code> - Source namespace name</div>
+                                <div><code class="bg-white px-2 py-1 rounded text-pink-700">.SourceName</code> - Source resource name</div>
+                                <div><code class="bg-white px-2 py-1 rounded text-pink-700">.TargetName</code> - Mirror resource name</div>
+                            </div>
+                            <p class="text-slate-700 text-lg mt-4">
+                                <strong>Template Functions:</strong> <code class="bg-white px-2 py-1 rounded font-mono text-pink-700">upper</code>, <code class="bg-white px-2 py-1 rounded font-mono text-pink-700">lower</code>, <code class="bg-white px-2 py-1 rounded font-mono text-pink-700">replace</code>, <code class="bg-white px-2 py-1 rounded font-mono text-pink-700">trimPrefix</code>, <code class="bg-white px-2 py-1 rounded font-mono text-pink-700">trimSuffix</code>, <code class="bg-white px-2 py-1 rounded font-mono text-pink-700">default</code>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Comparison Section -->
+        <section id="comparison" class="py-24 bg-gradient-to-br from-slate-50 to-blue-50">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="text-center mb-16">
+                    <h2 class="text-5xl font-extrabold text-slate-900 mb-6">How KubeMirror Compares</h2>
+                    <p class="text-2xl text-slate-600">We built KubeMirror to replace <a href="https://github.com/emberstack/kubernetes-reflector" class="text-blue-600 hover:underline font-semibold" target="_blank">emberstack/reflector</a></p>
+                </div>
+
+                <div class="overflow-x-auto rounded-2xl shadow-2xl">
+                    <table class="w-full bg-white">
+                        <thead class="bg-gradient-to-r from-slate-800 to-slate-900 text-white">
+                            <tr>
+                                <th class="px-8 py-6 text-left font-bold text-lg">Capability</th>
+                                <th class="px-8 py-6 text-center font-bold text-lg">KubeMirror</th>
+                                <th class="px-8 py-6 text-center font-bold text-lg">Reflector</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-200">
+                            <tr class="hover:bg-blue-50 transition-colors">
+                                <td class="px-8 py-6">
+                                    <div class="font-semibold text-lg text-slate-900">Supported Resources</div>
+                                    <div class="text-sm text-slate-600 mt-1">What resource types can be mirrored</div>
+                                </td>
+                                <td class="px-8 py-6 text-center">
+                                    <div><i class="fas fa-check-circle text-green-500 text-3xl"></i></div>
+                                    <div class="text-sm font-semibold text-green-700 mt-2">Secrets, ConfigMaps, CRDs, etc.</div>
+                                </td>
+                                <td class="px-8 py-6 text-center">
+                                    <div><i class="fas fa-minus-circle text-yellow-500 text-3xl"></i></div>
+                                    <div class="text-sm font-semibold text-yellow-700 mt-2">Secrets, ConfigMaps only</div>
+                                </td>
+                            </tr>
+                            <tr class="hover:bg-blue-50 transition-colors bg-slate-50">
+                                <td class="px-8 py-6">
+                                    <div class="font-semibold text-lg text-slate-900">Auto-Discovery</div>
+                                    <div class="text-sm text-slate-600 mt-1">Finds all resource types automatically</div>
+                                </td>
+                                <td class="px-8 py-6 text-center">
+                                    <div><i class="fas fa-check-circle text-green-500 text-3xl"></i></div>
+                                    <div class="text-sm font-semibold text-green-700 mt-2">Yes</div>
+                                </td>
+                                <td class="px-8 py-6 text-center">
+                                    <div><i class="fas fa-times-circle text-red-500 text-3xl"></i></div>
+                                    <div class="text-sm font-semibold text-red-700 mt-2">Hardcoded</div>
+                                </td>
+                            </tr>
+                            <tr class="hover:bg-blue-50 transition-colors">
+                                <td class="px-8 py-6">
+                                    <div class="font-semibold text-lg text-slate-900">Value Transformation</div>
+                                    <div class="text-sm text-slate-600 mt-1">Change values per target namespace</div>
+                                </td>
+                                <td class="px-8 py-6 text-center">
+                                    <div><i class="fas fa-check-circle text-green-500 text-3xl"></i></div>
+                                    <div class="text-sm font-semibold text-green-700 mt-2">Full support</div>
+                                </td>
+                                <td class="px-8 py-6 text-center">
+                                    <div><i class="fas fa-times-circle text-red-500 text-3xl"></i></div>
+                                    <div class="text-sm font-semibold text-red-700 mt-2">Not available</div>
+                                </td>
+                            </tr>
+                            <tr class="hover:bg-blue-50 transition-colors bg-slate-50">
+                                <td class="px-8 py-6">
+                                    <div class="font-semibold text-lg text-slate-900">Environment-Specific Rules</div>
+                                    <div class="text-sm text-slate-600 mt-1">Different transforms for dev/staging/prod</div>
+                                </td>
+                                <td class="px-8 py-6 text-center">
+                                    <div><i class="fas fa-check-circle text-green-500 text-3xl"></i></div>
+                                    <div class="text-sm font-semibold text-green-700 mt-2">Namespace patterns</div>
+                                </td>
+                                <td class="px-8 py-6 text-center">
+                                    <div><i class="fas fa-times-circle text-red-500 text-3xl"></i></div>
+                                    <div class="text-sm font-semibold text-red-700 mt-2">Not available</div>
+                                </td>
+                            </tr>
+                            <tr class="hover:bg-blue-50 transition-colors">
+                                <td class="px-8 py-6">
+                                    <div class="font-semibold text-lg text-slate-900">API Efficiency</div>
+                                    <div class="text-sm text-slate-600 mt-1">Impact on Kubernetes API server</div>
+                                </td>
+                                <td class="px-8 py-6 text-center">
+                                    <div><i class="fas fa-check-circle text-green-500 text-3xl"></i></div>
+                                    <div class="text-sm font-semibold text-green-700 mt-2">90% less load</div>
+                                </td>
+                                <td class="px-8 py-6 text-center">
+                                    <div><i class="fas fa-minus-circle text-yellow-500 text-3xl"></i></div>
+                                    <div class="text-sm font-semibold text-yellow-700 mt-2">Higher load</div>
+                                </td>
+                            </tr>
+                            <tr class="hover:bg-blue-50 transition-colors bg-slate-50">
+                                <td class="px-8 py-6">
+                                    <div class="font-semibold text-lg text-slate-900">Active Development</div>
+                                    <div class="text-sm text-slate-600 mt-1">Regular updates and bug fixes</div>
+                                </td>
+                                <td class="px-8 py-6 text-center">
+                                    <div><i class="fas fa-check-circle text-green-500 text-3xl"></i></div>
+                                    <div class="text-sm font-semibold text-green-700 mt-2">Active</div>
+                                </td>
+                                <td class="px-8 py-6 text-center">
+                                    <div><i class="fas fa-check-circle text-green-500 text-3xl"></i></div>
+                                    <div class="text-sm font-semibold text-green-700 mt-2">Recently resumed (2025)</div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="mt-16 bg-gradient-to-br from-blue-50 to-indigo-100 border-l-4 border-blue-600 p-8 rounded-xl shadow-xl">
+                    <div class="flex items-start gap-6">
+                        <i class="fas fa-info-circle text-blue-600 text-4xl mt-1"></i>
+                        <div>
+                            <h4 class="text-2xl font-bold text-slate-900 mb-4">Why We Built KubeMirror</h4>
+                            <p class="text-slate-700 text-lg leading-relaxed">
+                                We needed to share Traefik Middleware across 200+ namespaces with environment-specific configurations.
+                                Reflector couldn't do it (Secrets/ConfigMaps only, no transformations). So we built KubeMirror with modern
+                                Kubernetes best practices and all the features we wished Reflector had.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Installation Section -->
+        <section id="installation" class="py-24 bg-white">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="text-center mb-20">
+                    <h2 class="text-5xl font-extrabold text-slate-900 mb-4">Installation</h2>
+                    <p class="text-2xl text-slate-600">Get started in under 2 minutes</p>
+                </div>
+
+                <div class="grid md:grid-cols-2 gap-10 mb-16">
+                    <!-- Helm Installation -->
+                    <div class="bg-gradient-to-br from-blue-50 to-indigo-50 p-10 rounded-2xl shadow-xl border border-blue-200 hover-lift">
+                        <div class="flex items-center mb-6">
+                            <div class="bg-blue-600 w-14 h-14 rounded-xl flex items-center justify-center mr-4">
+                                <i class="fas fa-ship text-2xl text-white"></i>
+                            </div>
+                            <h3 class="text-3xl font-bold text-slate-900">Helm <span class="text-blue-600">(Recommended)</span></h3>
+                        </div>
+                        <div class="code-block text-gray-100 p-6 rounded-xl font-mono text-sm overflow-x-auto shadow-lg">
+<pre><span class="text-green-400">helm repo add kubemirror \</span>
+  https://lukaszraczylo.github.io/helm-charts
+
+<span class="text-green-400">helm install kubemirror \</span>
+  kubemirror/kubemirror \
+  --namespace kubemirror-system \
+  --create-namespace</pre>
+                        </div>
+                    </div>
+
+                    <!-- kubectl Installation -->
+                    <div class="bg-gradient-to-br from-purple-50 to-pink-50 p-10 rounded-2xl shadow-xl border border-purple-200 hover-lift">
+                        <div class="flex items-center mb-6">
+                            <div class="bg-purple-600 w-14 h-14 rounded-xl flex items-center justify-center mr-4">
+                                <i class="fas fa-terminal text-2xl text-white"></i>
+                            </div>
+                            <h3 class="text-3xl font-bold text-slate-900">kubectl</h3>
+                        </div>
+                        <div class="code-block text-gray-100 p-6 rounded-xl font-mono text-sm overflow-x-auto shadow-lg">
+<pre><span class="text-green-400">kubectl apply -k \</span>
+  github.com/lukaszraczylo/kubemirror/deploy
+
+<span class="text-pink-400"># Or with specific version</span>
+<span class="text-green-400">kubectl apply -k \</span>
+  github.com/lukaszraczylo/kubemirror/deploy?ref=v1.0.0</pre>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Start Example -->
+                <div class="bg-gradient-to-br from-green-50 to-teal-50 p-12 rounded-2xl shadow-2xl border border-green-200">
+                    <h3 class="text-4xl font-bold text-slate-900 mb-8 text-center">
+                        <i class="fas fa-rocket text-green-600 mr-3"></i>
+                        Quick Start: Mirror a Secret in 30 Seconds
+                    </h3>
+
+                    <div class="grid md:grid-cols-2 gap-10">
+                        <div>
+                            <div class="flex items-center gap-3 mb-6">
+                                <div class="bg-green-600 w-10 h-10 rounded-full flex items-center justify-center text-white font-bold">1</div>
+                                <h4 class="font-bold text-2xl text-slate-900">Create your source Secret</h4>
+                            </div>
+                            <div class="code-block text-gray-100 p-6 rounded-xl font-mono text-sm overflow-x-auto shadow-lg">
+<pre><span class="text-blue-400">apiVersion:</span> v1
+<span class="text-blue-400">kind:</span> Secret
+<span class="text-blue-400">metadata:</span>
+  <span class="text-yellow-400">name:</span> tls-cert
+  <span class="text-yellow-400">namespace:</span> default
+  <span class="text-yellow-400">labels:</span>
+    <span class="text-green-400">kubemirror.raczylo.com/enabled:</span> <span class="text-purple-400">"true"</span>
+  <span class="text-yellow-400">annotations:</span>
+    <span class="text-green-400">kubemirror.raczylo.com/sync:</span> <span class="text-purple-400">"true"</span>
+    <span class="text-green-400">kubemirror.raczylo.com/target-namespaces:</span> <span class="text-purple-400">"app-1,app-2"</span>
+<span class="text-blue-400">type:</span> kubernetes.io/tls
+<span class="text-blue-400">data:</span>
+  <span class="text-yellow-400">tls.crt:</span> LS0tLS1CRUd...
+  <span class="text-yellow-400">tls.key:</span> LS0tLS1CRUd...</pre>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div class="flex items-center gap-3 mb-6">
+                                <div class="bg-green-600 w-10 h-10 rounded-full flex items-center justify-center text-white font-bold">2</div>
+                                <h4 class="font-bold text-2xl text-slate-900">That's it!</h4>
+                            </div>
+                            <p class="text-slate-700 mb-6 text-lg">
+                                KubeMirror automatically:
+                            </p>
+                            <ul class="text-slate-700 space-y-4 text-lg">
+                                <li class="flex items-start gap-3">
+                                    <i class="fas fa-check-circle text-green-500 text-xl mt-1"></i>
+                                    <span>Creates copies in <code class="bg-white px-2 py-1 rounded font-mono text-green-700">app-1</code> and <code class="bg-white px-2 py-1 rounded font-mono text-green-700">app-2</code></span>
+                                </li>
+                                <li class="flex items-start gap-3">
+                                    <i class="fas fa-check-circle text-green-500 text-xl mt-1"></i>
+                                    <span>Keeps them synchronized when you update the source</span>
+                                </li>
+                                <li class="flex items-start gap-3">
+                                    <i class="fas fa-check-circle text-green-500 text-xl mt-1"></i>
+                                    <span>Recreates them if someone deletes a copy</span>
+                                </li>
+                                <li class="flex items-start gap-3">
+                                    <i class="fas fa-check-circle text-green-500 text-xl mt-1"></i>
+                                    <span>Cleans up all copies when you delete the source</span>
+                                </li>
+                            </ul>
+                            <div class="mt-8 p-5 bg-green-100 rounded-lg border border-green-300">
+                                <p class="text-sm text-slate-700">
+                                    <strong class="text-green-800">Required:</strong> Both the label <code class="bg-white px-2 py-1 rounded font-mono text-green-700">kubemirror.raczylo.com/enabled</code>
+                                    and annotation <code class="bg-white px-2 py-1 rounded font-mono text-green-700">kubemirror.raczylo.com/sync</code> are needed.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Documentation Section -->
+        <section class="py-24 bg-gradient-to-br from-slate-50 to-blue-50">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="text-center mb-20">
+                    <h2 class="text-5xl font-extrabold text-slate-900 mb-4">Documentation</h2>
+                    <p class="text-xl text-slate-600">Everything you need to know</p>
+                </div>
+
+                <div class="grid md:grid-cols-3 gap-10">
+                    <a href="https://github.com/lukaszraczylo/kubemirror#usage-examples" target="_blank" class="bg-white p-10 rounded-2xl shadow-xl hover-lift border border-blue-100 group">
+                        <div class="bg-gradient-to-br from-blue-500 to-purple-600 w-16 h-16 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                            <i class="fas fa-book-open text-3xl text-white"></i>
+                        </div>
+                        <h3 class="text-2xl font-bold text-slate-900 mb-3 group-hover:text-blue-600 transition-colors">Usage Examples</h3>
+                        <p class="text-slate-600 text-lg">Real-world examples for common use cases</p>
+                    </a>
+
+                    <a href="https://github.com/lukaszraczylo/kubemirror/tree/main/examples#transformation-rules" target="_blank" class="bg-white p-10 rounded-2xl shadow-xl hover-lift border border-purple-100 group">
+                        <div class="bg-gradient-to-br from-purple-500 to-pink-600 w-16 h-16 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                            <i class="fas fa-magic text-3xl text-white"></i>
+                        </div>
+                        <h3 class="text-2xl font-bold text-slate-900 mb-3 group-hover:text-purple-600 transition-colors">Transformation Rules</h3>
+                        <p class="text-slate-600 text-lg">Change values based on target environment</p>
+                    </a>
+
+                    <a href="https://github.com/lukaszraczylo/kubemirror#configuration" target="_blank" class="bg-white p-10 rounded-2xl shadow-xl hover-lift border border-green-100 group">
+                        <div class="bg-gradient-to-br from-green-500 to-teal-600 w-16 h-16 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                            <i class="fas fa-cog text-3xl text-white"></i>
+                        </div>
+                        <h3 class="text-2xl font-bold text-slate-900 mb-3 group-hover:text-green-600 transition-colors">Configuration</h3>
+                        <p class="text-slate-600 text-lg">Helm values and advanced settings</p>
+                    </a>
+                </div>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="bg-gradient-to-br from-slate-900 to-slate-800 text-gray-300 py-16">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="grid md:grid-cols-3 gap-12">
+                    <div>
+                        <div class="flex items-center mb-6">
+                            <div class="bg-gradient-to-br from-blue-500 to-purple-600 p-2 rounded-lg mr-3">
+                                <i class="fas fa-copy text-2xl text-white"></i>
+                            </div>
+                            <span class="text-2xl font-bold text-white">KubeMirror</span>
+                        </div>
+                        <p class="text-gray-400 text-lg leading-relaxed">
+                            Copy Kubernetes resources across namespaces. Modern replacement for Reflector.
+                        </p>
+                    </div>
+                    <div>
+                        <h4 class="text-xl font-bold text-white mb-6">Links</h4>
+                        <ul class="space-y-3 text-lg">
+                            <li><a href="https://github.com/lukaszraczylo/kubemirror" target="_blank" class="hover:text-white transition-colors"><i class="fab fa-github mr-2"></i>GitHub</a></li>
+                            <li><a href="https://github.com/lukaszraczylo/kubemirror/issues" target="_blank" class="hover:text-white transition-colors"><i class="fas fa-bug mr-2"></i>Report Issue</a></li>
+                            <li><a href="https://github.com/lukaszraczylo/kubemirror/releases" target="_blank" class="hover:text-white transition-colors"><i class="fas fa-tag mr-2"></i>Releases</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 class="text-xl font-bold text-white mb-6">License</h4>
+                        <p class="text-gray-400 text-lg">MIT License</p>
+                        <p class="text-gray-400 mt-4 text-lg">© 2024 Lukasz Raczylo</p>
+                    </div>
+                </div>
+            </div>
+        </footer>
+    </body>
+</html>

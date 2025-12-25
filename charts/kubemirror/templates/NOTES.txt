@@ -1,0 +1,36 @@
+Thank you for installing {{ .Chart.Name }}.
+
+Your release is named {{ .Release.Name }}.
+
+To learn more about the release, try:
+
+  $ helm status {{ .Release.Name }} -n {{ .Release.Namespace }}
+  $ helm get all {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+KubeMirror is now running and will automatically mirror resources across namespaces.
+
+To mirror a Secret or ConfigMap, add this LABEL and ANNOTATIONS:
+
+  # Label (required for server-side filtering):
+  kubemirror.raczylo.com/enabled: "true"
+
+  # Annotations:
+  kubemirror.raczylo.com/sync: "true"
+  kubemirror.raczylo.com/target-namespaces: "namespace1,namespace2"
+
+Or use "all" to mirror to all namespaces with the allow-mirrors label:
+
+  kubemirror.raczylo.com/target-namespaces: "all"
+
+To allow a namespace to receive mirrored resources, add this label:
+
+  kubemirror.raczylo.com/allow-mirrors: "true"
+
+View controller logs:
+
+  $ kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "kubemirror.name" . }}
+
+Check metrics:
+
+  $ kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "kubemirror.fullname" . }}-metrics {{ .Values.service.metricsPort }}:{{ .Values.service.metricsPort }}
+  $ curl http://localhost:{{ .Values.service.metricsPort }}/metrics

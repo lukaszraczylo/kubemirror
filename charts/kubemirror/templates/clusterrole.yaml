@@ -1,0 +1,57 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kubemirror.fullname" . }}
+  labels:
+    {{- include "kubemirror.labels" . | nindent 4 }}
+rules:
+  # Discovery - read access to all API groups for resource discovery
+  # This is required for auto-discovering available resource types
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs:
+      - get
+      - list
+      - watch
+
+  # Full access to all mirrorable resources
+  # Required for creating, updating, and deleting mirrors across all resource types
+  # The controller will only mirror resources that are explicitly marked with
+  # kubemirror.raczylo.com/enabled label and kubemirror.raczylo.com/sync annotation
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs:
+      - create
+      - update
+      - patch
+      - delete
+
+  # Namespaces - read only (for listing and filtering)
+  - apiGroups: [""]
+    resources:
+      - namespaces
+    verbs:
+      - get
+      - list
+      - watch
+
+  # Leader election - coordination.k8s.io/v1
+  - apiGroups: ["coordination.k8s.io"]
+    resources:
+      - leases
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+
+  # Events - for creating events about mirroring operations
+  - apiGroups: [""]
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
