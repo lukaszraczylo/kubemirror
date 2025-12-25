@@ -1,0 +1,79 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: namespace-1
+  annotations:
+    # Mirror this ConfigMap to all namespaces
+    kubemirror.raczylo.com/sync: "true"
+    kubemirror.raczylo.com/target-namespaces: "all"
+  labels:
+    # Required: enables server-side filtering
+    kubemirror.raczylo.com/enabled: "true"
+    app: kubemirror-example
+    resource-type: shared-config
+data:
+  app.properties: |
+    server.port=8080
+    server.host=0.0.0.0
+    log.level=info
+    feature.enabled=true
+
+  database.yaml: |
+    database:
+      pool:
+        min: 5
+        max: 20
+      timeout: 30s
+
+  settings.json: |
+    {
+      "theme": "dark",
+      "language": "en",
+      "timezone": "UTC",
+      "features": {
+        "beta": false,
+        "experimental": false
+      }
+    }
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: namespace-1
+  annotations:
+    # Mirror to specific namespaces only
+    kubemirror.raczylo.com/sync: "true"
+    kubemirror.raczylo.com/target-namespaces: "namespace-2,namespace-5"
+  labels:
+    # Required: enables server-side filtering
+    kubemirror.raczylo.com/enabled: "true"
+    app: kubemirror-example
+    resource-type: nginx-config
+data:
+  nginx.conf: |
+    user nginx;
+    worker_processes auto;
+    error_log /var/log/nginx/error.log warn;
+    pid /var/run/nginx.pid;
+
+    events {
+        worker_connections 1024;
+    }
+
+    http {
+        include /etc/nginx/mime.types;
+        default_type application/octet-stream;
+
+        log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                        '$status $body_bytes_sent "$http_referer" '
+                        '"$http_user_agent" "$http_x_forwarded_for"';
+
+        access_log /var/log/nginx/access.log main;
+        sendfile on;
+        keepalive_timeout 65;
+        gzip on;
+    }

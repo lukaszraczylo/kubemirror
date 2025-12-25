@@ -1,0 +1,146 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kubemirror-alerts
+  namespace: kubemirror-system
+  labels:
+    app.kubernetes.io/name: kubemirror
+    app.kubernetes.io/component: monitoring
+spec:
+  groups:
+    - name: kubemirror.rules
+      interval: 30s
+      rules:
+        # Controller health alerts
+        - alert: KubeMirrorControllerDown
+          expr: up{service="kubemirror-controller-metrics"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            component: kubemirror
+          annotations:
+            summary: "KubeMirror controller is down"
+            description: "KubeMirror controller in namespace {{ $labels.namespace }} has been down for more than 5 minutes."
+
+        - alert: KubeMirrorHighReconcileErrors
+          expr: |
+            rate(controller_runtime_reconcile_errors_total{controller="secret"}[5m]) > 0.1
+            or
+            rate(controller_runtime_reconcile_errors_total{controller="configmap"}[5m]) > 0.1
+          for: 10m
+          labels:
+            severity: warning
+            component: kubemirror
+          annotations:
+            summary: "High reconciliation error rate in KubeMirror"
+            description: "KubeMirror controller {{ $labels.controller }} is experiencing high error rate: {{ $value | humanizePercentage }} errors/sec"
+
+        - alert: KubeMirrorReconcileLatencyHigh
+          expr: |
+            histogram_quantile(0.99,
+              rate(controller_runtime_reconcile_time_seconds_bucket{controller=~"secret|configmap"}[5m])
+            ) > 5
+          for: 10m
+          labels:
+            severity: warning
+            component: kubemirror
+          annotations:
+            summary: "High reconciliation latency in KubeMirror"
+            description: "KubeMirror {{ $labels.controller }} controller p99 latency is {{ $value | humanizeDuration }}"
+
+        - alert: KubeMirrorWorkqueueDepthHigh
+          expr: |
+            workqueue_depth{name=~"secret|configmap"} > 100
+          for: 15m
+          labels:
+            severity: warning
+            component: kubemirror
+          annotations:
+            summary: "High workqueue depth in KubeMirror"
+            description: "KubeMirror {{ $labels.name }} workqueue has {{ $value }} items pending for more than 15 minutes"
+
+        - alert: KubeMirrorLeaderElectionLost
+          expr: |
+            leader_election_master_status{name="kubemirror-controller-leader"} == 0
+          for: 2m
+          labels:
+            severity: warning
+            component: kubemirror
+          annotations:
+            summary: "KubeMirror lost leader election"
+            description: "KubeMirror controller on pod {{ $labels.pod }} is not the leader"
+
+        # Resource mirror alerts
+        - alert: KubeMirrorHighFailureRate
+          expr: |
+            sum(rate(controller_runtime_reconcile_errors_total{controller=~"secret|configmap"}[5m]))
+            /
+            sum(rate(controller_runtime_reconcile_total{controller=~"secret|configmap"}[5m]))
+            > 0.05
+          for: 10m
+          labels:
+            severity: warning
+            component: kubemirror
+          annotations:
+            summary: "High mirror operation failure rate"
+            description: "KubeMirror has {{ $value | humanizePercentage }} failure rate over the last 10 minutes"
+
+        - alert: KubeMirrorMemoryHigh
+          expr: |
+            container_memory_working_set_bytes{pod=~"kubemirror-.*",container="controller"}
+            /
+            container_spec_memory_limit_bytes{pod=~"kubemirror-.*",container="controller"}
+            > 0.9
+          for: 5m
+          labels:
+            severity: warning
+            component: kubemirror
+          annotations:
+            summary: "KubeMirror controller high memory usage"
+            description: "KubeMirror controller {{ $labels.pod }} is using {{ $value | humanizePercentage }} of its memory limit"
+
+        - alert: KubeMirrorCPUThrottling
+          expr: |
+            rate(container_cpu_cfs_throttled_seconds_total{pod=~"kubemirror-.*",container="controller"}[5m]) > 0.5
+          for: 10m
+          labels:
+            severity: warning
+            component: kubemirror
+          annotations:
+            summary: "KubeMirror controller is being CPU throttled"
+            description: "KubeMirror controller {{ $labels.pod }} is experiencing CPU throttling: {{ $value | humanizeDuration }}/sec"
+
+    - name: kubemirror.recording
+      interval: 30s
+      rules:
+        # Recording rules for better query performance
+        - record: kubemirror:reconcile_duration_seconds:p99
+          expr: |
+            histogram_quantile(0.99,
+              rate(controller_runtime_reconcile_time_seconds_bucket{controller=~"secret|configmap"}[5m])
+            )
+
+        - record: kubemirror:reconcile_duration_seconds:p95
+          expr: |
+            histogram_quantile(0.95,
+              rate(controller_runtime_reconcile_time_seconds_bucket{controller=~"secret|configmap"}[5m])
+            )
+
+        - record: kubemirror:reconcile_duration_seconds:p50
+          expr: |
+            histogram_quantile(0.50,
+              rate(controller_runtime_reconcile_time_seconds_bucket{controller=~"secret|configmap"}[5m])
+            )
+
+        - record: kubemirror:reconcile_rate:5m
+          expr: |
+            sum(rate(controller_runtime_reconcile_total{controller=~"secret|configmap"}[5m])) by (controller, result)
+
+        - record: kubemirror:reconcile_errors:rate5m
+          expr: |
+            sum(rate(controller_runtime_reconcile_errors_total{controller=~"secret|configmap"}[5m])) by (controller)
+
+        - record: kubemirror:workqueue_depth:max
+          expr: |
+            max(workqueue_depth{name=~"secret|configmap"}) by (name)

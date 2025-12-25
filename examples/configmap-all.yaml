@@ -1,0 +1,22 @@
+---
+# Example: Mirror a ConfigMap to all namespaces (except excluded ones)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: default
+  labels:
+    kubemirror.raczylo.com/enabled: "true"
+  annotations:
+    kubemirror.raczylo.com/sync: "true"
+    # Mirror to all namespaces (except kube-system, kube-public, etc.)
+    kubemirror.raczylo.com/target-namespaces: "all"
+data:
+  app.conf: |
+    server {
+      listen 8080;
+      location / {
+        proxy_pass http://backend:3000;
+      }
+    }
+  log-level: "info"

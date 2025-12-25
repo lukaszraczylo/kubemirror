@@ -1,0 +1,12 @@
+# Runtime stage - using distroless for minimal attack surface
+FROM gcr.io/distroless/static:nonroot
+
+WORKDIR /
+
+# Copy the binary from goreleaser build
+COPY kubemirror /kubemirror
+
+# Use nonroot user (65532)
+USER 65532:65532
+
+ENTRYPOINT ["/kubemirror"]

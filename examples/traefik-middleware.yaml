@@ -1,0 +1,64 @@
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: compression
+  namespace: namespace-2
+  annotations:
+    # Mirror this Traefik middleware to namespace-4 and namespace-5
+    kubemirror.raczylo.com/sync: "true"
+    kubemirror.raczylo.com/target-namespaces: "namespace-4,namespace-5"
+  labels:
+    # Required: enables server-side filtering
+    kubemirror.raczylo.com/enabled: "true"
+    app: kubemirror-example
+    resource-type: traefik-middleware
+spec:
+  compress:
+    excludedContentTypes:
+      - text/event-stream
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: rate-limit
+  namespace: namespace-2
+  annotations:
+    # Mirror to all namespaces for consistent rate limiting
+    kubemirror.raczylo.com/sync: "true"
+    kubemirror.raczylo.com/target-namespaces: "all"
+  labels:
+    # Required: enables server-side filtering
+    kubemirror.raczylo.com/enabled: "true"
+    app: kubemirror-example
+    resource-type: traefik-middleware
+spec:
+  rateLimit:
+    average: 100
+    burst: 50
+    period: 1m
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: headers
+  namespace: namespace-2
+  annotations:
+    # Mirror only to namespace-3
+    kubemirror.raczylo.com/sync: "true"
+    kubemirror.raczylo.com/target-namespaces: "namespace-3"
+  labels:
+    # Required: enables server-side filtering
+    kubemirror.raczylo.com/enabled: "true"
+    app: kubemirror-example
+    resource-type: traefik-middleware
+spec:
+  headers:
+    customRequestHeaders:
+      X-Forwarded-Proto: "https"
+      X-Frame-Options: "DENY"
+      X-Content-Type-Options: "nosniff"
+    customResponseHeaders:
+      X-Custom-Response-Header: "kubemirror-example"

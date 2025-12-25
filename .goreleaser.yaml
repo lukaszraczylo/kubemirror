@@ -1,0 +1,176 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# vim: set ts=2 sw=2 tw=0 fo=cnqoj
+
+version: 2
+
+project_name: kubemirror
+
+before:
+  hooks:
+    - go mod tidy
+    - go mod verify
+    # Note: Helm chart versioning is handled by the helm-charts repository
+    # triggered by the publish-helm-chart job in .github/workflows/release.yaml
+
+builds:
+  - id: kubemirror
+    main: ./cmd/kubemirror
+    binary: kubemirror
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.Version={{.Version}}
+      - -X main.Commit={{.Commit}}
+      - -X main.Date={{.Date}}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    files:
+      - README.md
+      - LICENSE
+      - examples/*
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - '^ci:'
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Performance Improvements
+      regexp: '^.*?perf(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: Others
+      order: 999
+
+release:
+  github:
+    owner: lukaszraczylo
+    name: kubemirror
+  draft: false
+  prerelease: auto
+  name_template: "v{{.Version}}"
+  header: |
+    ## KubeMirror v{{.Version}}
+
+    Kubernetes controller for mirroring resources (Secrets, ConfigMaps) across namespaces with automatic synchronization.
+
+    ### Installation
+
+    **Helm (recommended):**
+    ```bash
+    helm repo add kubemirror https://lukaszraczylo.github.io/helm-charts
+    helm repo update
+    helm install kubemirror kubemirror/kubemirror --version {{.Version}}
+    ```
+
+    **Helm (from release asset):**
+    ```bash
+    helm install kubemirror https://github.com/lukaszraczylo/kubemirror/releases/download/v{{.Version}}/kubemirror-{{.Version}}.tgz
+    ```
+
+    **Docker:**
+    ```bash
+    docker pull ghcr.io/lukaszraczylo/kubemirror:{{.Version}}
+    ```
+
+    **Binary (Linux/macOS/Windows):**
+    Download the archive for your platform from the assets below, extract, and run:
+    ```bash
+    ./kubemirror --help
+    ```
+
+    ### Usage
+
+    Apply labels and annotations to resources you want to mirror:
+    ```yaml
+    apiVersion: v1
+    kind: Secret
+    metadata:
+      name: my-secret
+      namespace: default
+      labels:
+        kubemirror.raczylo.com/enabled: "true"
+      annotations:
+        kubemirror.raczylo.com/sync: "true"
+        kubemirror.raczylo.com/target-namespaces: "app1,app2,app-*"
+    ```
+
+    See [examples/](https://github.com/lukaszraczylo/kubemirror/tree/main/examples) for more usage patterns.
+
+dockers_v2:
+  - ids:
+      - kubemirror
+    images:
+      - "ghcr.io/lukaszraczylo/kubemirror"
+    tags:
+      - "{{ .Version }}"
+      - "latest"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    dockerfile: Dockerfile.goreleaser
+    labels:
+      "org.opencontainers.image.title": "{{ .ProjectName }}"
+      "org.opencontainers.image.version": "{{ .Version }}"
+      "org.opencontainers.image.source": "https://github.com/lukaszraczylo/kubemirror"
+      "org.opencontainers.image.description": "Kubernetes controller for mirroring resources across namespaces"
+      "org.opencontainers.image.licenses": "MIT"
+
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    args:
+      - sign-blob
+      - "--bundle=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
+
+docker_signs:
+  - cmd: cosign
+    artifacts: images
+    output: true
+    args:
+      - sign
+      - "${artifact}@${digest}"
+      - "--yes"
