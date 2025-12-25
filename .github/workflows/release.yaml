@@ -13,36 +13,10 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.25"
-          cache: true
-
-      - name: Install cosign
-        uses: sigstore/cosign-installer@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          version: latest
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    uses: lukaszraczylo/shared-actions/.github/workflows/go-release.yaml@main
+    with:
+      go-version: ">=1.25"
+    secrets: inherit
 
   publish-helm-chart:
     needs: release
@@ -65,7 +39,12 @@ jobs:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          gh api repos/lukaszraczylo/helm-charts/dispatches             -f event_type=release-chart             -f client_payload[chart_name]=kubemirror             -f client_payload[version]="$RELEASE_VERSION"             -f client_payload[source_repo]=lukaszraczylo/kubemirror             -f client_payload[chart_path]=charts/kubemirror
+          gh api repos/lukaszraczylo/helm-charts/dispatches \
+            -f event_type=release-chart \
+            -f client_payload[chart_name]=kubemirror \
+            -f client_payload[version]="$RELEASE_VERSION" \
+            -f client_payload[source_repo]=lukaszraczylo/kubemirror \
+            -f client_payload[chart_path]=charts/kubemirror
 
   publish-website:
     needs: release
