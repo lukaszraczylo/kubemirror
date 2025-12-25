@@ -1,12 +1,8 @@
-# Runtime stage - using distroless for minimal attack surface
+# Dockerfile for GoReleaser dockers_v2
+# GoReleaser organizes binaries by platform: linux/amd64/kubemirror, linux/arm64/kubemirror
 FROM gcr.io/distroless/static:nonroot
-
+ARG TARGETPLATFORM
 WORKDIR /
-
-# Copy the binary from goreleaser build
-COPY kubemirror /kubemirror
-
-# Use nonroot user (65532)
+COPY ${TARGETPLATFORM}/kubemirror /kubemirror
 USER 65532:65532
-
 ENTRYPOINT ["/kubemirror"]
