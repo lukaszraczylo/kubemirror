@@ -551,3 +551,243 @@ func TestSourceReconciler_cleanupOrphanedMirrors(t *testing.T) {
 	mockClient.AssertExpectations(t)
 	mockLister.AssertExpectations(t)
 }
+
+func TestSourceReconciler_Reconcile_AnnotationChange_AllToAllLabeled(t *testing.T) {
+	// Scenario: annotation changes from "all" → "all-labeled"
+	// Before: mirrors in all 5 namespaces
+	// After: mirrors only in labeled namespaces (app-1, app-2)
+	// Expected: 3 orphaned mirrors deleted (app-3, prod-1, prod-2)
+
+	source := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]interface{}{
+				"name":      "test-secret",
+				"namespace": "default",
+				"uid":       "source-uid-123",
+				"labels": map[string]interface{}{
+					constants.LabelEnabled: "true",
+				},
+				"annotations": map[string]interface{}{
+					constants.AnnotationSync:             "true",
+					constants.AnnotationTargetNamespaces: "all-labeled", // Changed from "all"
+				},
+			},
+			"data": map[string]interface{}{
+				"password": "c2VjcmV0",
+			},
+		},
+	}
+
+	// Setup: 5 total namespaces, only 2 have allow-mirrors label
+	allNamespaces := []string{"default", "app-1", "app-2", "app-3", "prod-1", "prod-2"}
+	allowMirrorsNamespaces := []string{"app-1", "app-2"}
+
+	// Mock existing orphaned mirrors in app-3, prod-1, prod-2
+	createOrphanedMirror := func(ns string) *unstructured.Unstructured {
+		return &unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "Secret",
+				"metadata": map[string]interface{}{
+					"name":      "test-secret",
+					"namespace": ns,
+					"labels": map[string]interface{}{
+						constants.LabelManagedBy: constants.ControllerName,
+						constants.LabelMirror:    "true",
+					},
+					"annotations": map[string]interface{}{
+						constants.AnnotationSourceNamespace: "default",
+						constants.AnnotationSourceName:      "test-secret",
+						constants.AnnotationSourceUID:       "source-uid-123",
+					},
+				},
+				"data": map[string]interface{}{
+					"password": "c2VjcmV0",
+				},
+			},
+		}
+	}
+
+	mockClient := new(MockClient)
+	mockLister := new(MockNamespaceLister)
+	mockFilter := filter.NewNamespaceFilter(nil, nil)
+
+	mockLister.On("ListNamespaces", mock.Anything).Return(allNamespaces, nil)
+	mockLister.On("ListAllowMirrorsNamespaces", mock.Anything).Return(allowMirrorsNamespaces, nil)
+
+	// Mock Get for source
+	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "default", Name: "test-secret"}, mock.Anything).
+		Return(nil, source)
+
+	// Mock reconcileMirror calls for app-1 and app-2 (current targets)
+	notFoundErr := errors.NewNotFound(schema.GroupResource{Group: "", Resource: "secrets"}, "test-secret")
+	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "app-1", Name: "test-secret"}, mock.Anything).
+		Return(notFoundErr, nil).Once()
+	mockClient.On("Create", mock.Anything, mock.MatchedBy(func(obj client.Object) bool {
+		return obj.GetNamespace() == "app-1"
+	}), mock.Anything).Return(nil).Once()
+
+	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "app-2", Name: "test-secret"}, mock.Anything).
+		Return(notFoundErr, nil).Once()
+	mockClient.On("Create", mock.Anything, mock.MatchedBy(func(obj client.Object) bool {
+		return obj.GetNamespace() == "app-2"
+	}), mock.Anything).Return(nil).Once()
+
+	// Mock cleanup: check orphaned namespaces app-3, prod-1, prod-2
+	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "app-3", Name: "test-secret"}, mock.Anything).
+		Return(nil, createOrphanedMirror("app-3")).Once()
+	mockClient.On("Delete", mock.Anything, mock.MatchedBy(func(obj client.Object) bool {
+		return obj.GetNamespace() == "app-3"
+	}), mock.Anything).Return(nil).Once()
+
+	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "prod-1", Name: "test-secret"}, mock.Anything).
+		Return(nil, createOrphanedMirror("prod-1")).Once()
+	mockClient.On("Delete", mock.Anything, mock.MatchedBy(func(obj client.Object) bool {
+		return obj.GetNamespace() == "prod-1"
+	}), mock.Anything).Return(nil).Once()
+
+	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "prod-2", Name: "test-secret"}, mock.Anything).
+		Return(nil, createOrphanedMirror("prod-2")).Once()
+	mockClient.On("Delete", mock.Anything, mock.MatchedBy(func(obj client.Object) bool {
+		return obj.GetNamespace() == "prod-2"
+	}), mock.Anything).Return(nil).Once()
+
+	// Mock Update for status annotation
+	mockClient.On("Update", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	r := &SourceReconciler{
+		Client:          mockClient,
+		Scheme:          runtime.NewScheme(),
+		Config:          &config.Config{},
+		Filter:          mockFilter,
+		NamespaceLister: mockLister,
+		GVK:             schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"},
+	}
+
+	ctx := context.Background()
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "test-secret"}}
+
+	result, err := r.Reconcile(ctx, req)
+
+	require.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result)
+
+	mockClient.AssertExpectations(t)
+	mockLister.AssertExpectations(t)
+}
+
+func TestSourceReconciler_Reconcile_AnnotationChange_PatternChange(t *testing.T) {
+	// Scenario: annotation changes from "app-*" → "prod-*"
+	// Before: mirrors in app-1, app-2, app-3
+	// After: mirrors in prod-1, prod-2
+	// Expected: app-1, app-2, app-3 deleted; prod-1, prod-2 created
+
+	source := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]interface{}{
+				"name":      "app-config",
+				"namespace": "default",
+				"uid":       "config-uid-456",
+				"labels": map[string]interface{}{
+					constants.LabelEnabled: "true",
+				},
+				"annotations": map[string]interface{}{
+					constants.AnnotationSync:             "true",
+					constants.AnnotationTargetNamespaces: "prod-*", // Changed from "app-*"
+				},
+			},
+			"data": map[string]interface{}{
+				"key": "value",
+			},
+		},
+	}
+
+	allNamespaces := []string{"default", "app-1", "app-2", "app-3", "prod-1", "prod-2"}
+
+	createOrphanedMirror := func(ns string) *unstructured.Unstructured {
+		return &unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]interface{}{
+					"name":      "app-config",
+					"namespace": ns,
+					"labels": map[string]interface{}{
+						constants.LabelManagedBy: constants.ControllerName,
+						constants.LabelMirror:    "true",
+					},
+					"annotations": map[string]interface{}{
+						constants.AnnotationSourceNamespace: "default",
+						constants.AnnotationSourceName:      "app-config",
+						constants.AnnotationSourceUID:       "config-uid-456",
+					},
+				},
+				"data": map[string]interface{}{
+					"key": "value",
+				},
+			},
+		}
+	}
+
+	mockClient := new(MockClient)
+	mockLister := new(MockNamespaceLister)
+	mockFilter := filter.NewNamespaceFilter(nil, nil)
+
+	mockLister.On("ListNamespaces", mock.Anything).Return(allNamespaces, nil)
+	mockLister.On("ListAllowMirrorsNamespaces", mock.Anything).Return([]string{}, nil)
+
+	// Mock Get for source
+	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "default", Name: "app-config"}, mock.Anything).
+		Return(nil, source)
+
+	notFoundErr := errors.NewNotFound(schema.GroupResource{Group: "", Resource: "configmaps"}, "app-config")
+
+	// Mock reconcileMirror for prod-1 and prod-2 (new targets)
+	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "prod-1", Name: "app-config"}, mock.Anything).
+		Return(notFoundErr, nil).Once()
+	mockClient.On("Create", mock.Anything, mock.MatchedBy(func(obj client.Object) bool {
+		return obj.GetNamespace() == "prod-1"
+	}), mock.Anything).Return(nil).Once()
+
+	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "prod-2", Name: "app-config"}, mock.Anything).
+		Return(notFoundErr, nil).Once()
+	mockClient.On("Create", mock.Anything, mock.MatchedBy(func(obj client.Object) bool {
+		return obj.GetNamespace() == "prod-2"
+	}), mock.Anything).Return(nil).Once()
+
+	// Mock cleanup: delete orphaned mirrors in app-1, app-2, app-3
+	for _, ns := range []string{"app-1", "app-2", "app-3"} {
+		mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: ns, Name: "app-config"}, mock.Anything).
+			Return(nil, createOrphanedMirror(ns)).Once()
+		mockClient.On("Delete", mock.Anything, mock.MatchedBy(func(obj client.Object) bool {
+			return obj.GetNamespace() == ns
+		}), mock.Anything).Return(nil).Once()
+	}
+
+	// Mock Update for status
+	mockClient.On("Update", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	r := &SourceReconciler{
+		Client:          mockClient,
+		Scheme:          runtime.NewScheme(),
+		Config:          &config.Config{},
+		Filter:          mockFilter,
+		NamespaceLister: mockLister,
+		GVK:             schema.GroupVersionKind{Group: "", Version: "v1", Kind: "ConfigMap"},
+	}
+
+	ctx := context.Background()
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "app-config"}}
+
+	result, err := r.Reconcile(ctx, req)
+
+	require.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result)
+
+	mockClient.AssertExpectations(t)
+	mockLister.AssertExpectations(t)
+}
