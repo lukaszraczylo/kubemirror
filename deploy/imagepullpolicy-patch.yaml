@@ -1,0 +1,11 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubemirror-controller
+  namespace: kubemirror-system
+spec:
+  template:
+    spec:
+      containers:
+        - name: controller
+          imagePullPolicy: IfNotPresent

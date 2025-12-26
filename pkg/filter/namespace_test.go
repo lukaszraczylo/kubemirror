@@ -318,6 +318,7 @@ func TestResolveTargetNamespaces(t *testing.T) {
 				tt.patterns,
 				tt.allNamespaces,
 				tt.allowMirrorsNamespaces,
+				[]string{}, // optOutNamespaces - empty for these tests
 				tt.sourceNamespace,
 				tt.filter,
 			)
@@ -342,6 +343,7 @@ func TestResolveTargetNamespaces_EdgeCases(t *testing.T) {
 			[]string{"all"},
 			[]string{},
 			[]string{},
+			[]string{}, // optOutNamespaces
 			"default",
 			NewNamespaceFilter([]string{}, []string{}),
 		)
@@ -354,6 +356,7 @@ func TestResolveTargetNamespaces_EdgeCases(t *testing.T) {
 			[]string{"[invalid"},
 			[]string{"app1"},
 			[]string{},
+			[]string{}, // optOutNamespaces
 			"default",
 			NewNamespaceFilter([]string{}, []string{}),
 		)
@@ -366,6 +369,7 @@ func TestResolveTargetNamespaces_EdgeCases(t *testing.T) {
 			[]string{"all"},
 			[]string{"app1", "app2", "app3"},
 			[]string{},
+			[]string{}, // optOutNamespaces
 			"default",
 			strictFilter,
 		)
@@ -541,6 +545,7 @@ func BenchmarkResolveTargetNamespaces(b *testing.B) {
 					tt.patterns,
 					allNamespaces,
 					allowMirrorsNamespaces,
+					[]string{}, // optOutNamespaces
 					"default",
 					filter,
 				)
@@ -566,6 +571,7 @@ func BenchmarkResolveTargetNamespaces_LargeScale(b *testing.B) {
 				[]string{constants.TargetNamespacesAll},
 				allNamespaces,
 				allowMirrorsNamespaces,
+				[]string{}, // optOutNamespaces
 				"default",
 				filter,
 			)
@@ -579,6 +585,7 @@ func BenchmarkResolveTargetNamespaces_LargeScale(b *testing.B) {
 				[]string{"namespace-*"},
 				allNamespaces,
 				allowMirrorsNamespaces,
+				[]string{}, // optOutNamespaces
 				"default",
 				filter,
 			)

@@ -10,6 +10,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+
+	"github.com/lukaszraczylo/kubemirror/pkg/constants"
 )
 
 // ComputeContentHash computes a SHA256 hash of the resource's actual content.
@@ -109,7 +111,7 @@ func NeedsSync(source, target runtime.Object, targetAnnotations map[string]strin
 	// Layer 1: Generation-based check (for resources that support it)
 	sourceGen := getGeneration(source)
 	if sourceGen > 0 {
-		targetSourceGen := targetAnnotations["source-generation"]
+		targetSourceGen := targetAnnotations[constants.AnnotationSourceGeneration]
 		if fmt.Sprintf("%d", sourceGen) != targetSourceGen {
 			return true, nil // Generation changed
 		}
@@ -121,7 +123,7 @@ func NeedsSync(source, target runtime.Object, targetAnnotations map[string]strin
 		return false, fmt.Errorf("failed to compute source hash: %w", err)
 	}
 
-	targetSourceHash := targetAnnotations["source-content-hash"]
+	targetSourceHash := targetAnnotations[constants.AnnotationSourceContentHash]
 	if sourceHash != targetSourceHash {
 		return true, nil // Content changed
 	}

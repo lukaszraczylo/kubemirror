@@ -302,18 +302,42 @@ func updateMirrorAnnotations(mirror metav1.Object, source runtime.Object, source
 }
 
 // updateUnstructuredMirror updates an unstructured mirror.
+// Uses generic field introspection to handle any resource type (Secrets, ConfigMaps, CRDs).
 func updateUnstructuredMirror(mirror, source runtime.Object, sourceHash string) error {
 	m := mirror.(*unstructured.Unstructured)
 	s := source.(*unstructured.Unstructured)
 
-	// Update spec
-	sourceSpec, found, err := unstructured.NestedMap(s.Object, "spec")
-	if err != nil {
-		return fmt.Errorf("failed to get source spec: %w", err)
+	// Fields to skip (Kubernetes-managed fields, not user content)
+	// These are managed by Kubernetes API server or controllers
+	skipFields := map[string]bool{
+		// Standard Kubernetes top-level fields
+		"metadata":   true, // Kubernetes metadata (name, namespace, labels, etc.) - managed separately
+		"status":     true, // Resource status - managed by controllers, never mirrored
+		"apiVersion": true, // API group version - static, set during creation
+		"kind":       true, // Resource kind - static, set during creation
+
+		// Kubernetes internal fields (rarely at top level, but be defensive)
+		"managedFields":              true, // Field management tracking - internal to Kubernetes
+		"selfLink":                   true, // Deprecated but might exist - auto-generated
+		"resourceVersion":            true, // Optimistic concurrency control - auto-generated
+		"generation":                 true, // Spec change counter - auto-generated (but usually in metadata)
+		"creationTimestamp":          true, // Resource creation time - auto-generated (but usually in metadata)
+		"deletionTimestamp":          true, // Resource deletion time - auto-generated (but usually in metadata)
+		"deletionGracePeriodSeconds": true, // Grace period - auto-managed (but usually in metadata)
+		"uid":                        true, // Unique identifier - auto-generated (but usually in metadata)
+		"ownerReferences":            true, // Ownership chain - should not be copied (but usually in metadata)
+		"finalizers":                 true, // Deletion hooks - should not be copied (but usually in metadata)
 	}
-	if found {
-		if err := unstructured.SetNestedMap(m.Object, sourceSpec, "spec"); err != nil {
-			return fmt.Errorf("failed to set mirror spec: %w", err)
+
+	// Copy all content fields from source to mirror
+	// This handles:
+	// - .spec (standard CRDs like Traefik Middleware)
+	// - .data, .type (Secrets)
+	// - .data, .binaryData (ConfigMaps)
+	// - Any custom top-level fields in non-standard CRDs
+	for key, value := range s.Object {
+		if !skipFields[key] {
+			m.Object[key] = value
 		}
 	}
 

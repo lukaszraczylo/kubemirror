@@ -105,6 +105,7 @@ func ParseTargetNamespaces(value string) []string {
 //   - patterns: namespace patterns from annotation
 //   - allNamespaces: list of all namespaces in cluster
 //   - allowMirrorsNamespaces: namespaces with allow-mirrors label
+//   - optOutNamespaces: namespaces with allow-mirrors="false" (explicitly opted out)
 //   - sourceNamespace: exclude this namespace to prevent self-copy
 //   - filter: namespace filter for exclusions
 //
@@ -113,11 +114,18 @@ func ResolveTargetNamespaces(
 	patterns []string,
 	allNamespaces []string,
 	allowMirrorsNamespaces []string,
+	optOutNamespaces []string,
 	sourceNamespace string,
 	filter *NamespaceFilter,
 ) []string {
 	if len(patterns) == 0 {
 		return nil
+	}
+
+	// Create map of opt-out namespaces for fast lookup
+	optOutMap := make(map[string]bool)
+	for _, ns := range optOutNamespaces {
+		optOutMap[ns] = true
 	}
 
 	// Use map to deduplicate
@@ -126,15 +134,18 @@ func ResolveTargetNamespaces(
 	for _, pattern := range patterns {
 		switch pattern {
 		case constants.TargetNamespacesAll:
-			// Mirror to all namespaces (except source and excluded)
+			// Mirror to all namespaces (except source, excluded, and opt-out)
+			// This implements opt-OUT model: namespaces without labels get mirrors
+			// Only namespaces with allow-mirrors="false" are excluded
 			for _, ns := range allNamespaces {
-				if ns != sourceNamespace && filter.IsAllowed(ns) {
+				if ns != sourceNamespace && filter.IsAllowed(ns) && !optOutMap[ns] {
 					targetMap[ns] = true
 				}
 			}
 
 		case constants.TargetNamespacesAllLabeled:
-			// Mirror only to namespaces with allow-mirrors label
+			// Mirror only to namespaces with allow-mirrors="true" label
+			// This implements opt-IN model
 			for _, ns := range allowMirrorsNamespaces {
 				if ns != sourceNamespace && filter.IsAllowed(ns) {
 					targetMap[ns] = true

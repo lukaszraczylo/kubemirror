@@ -587,6 +587,7 @@ When running the binary directly:
 - `--worker-threads int` - Concurrent workers (default: 5)
 - `--rate-limit-qps float32` - API rate limit (default: 50.0)
 - `--rate-limit-burst int` - API burst limit (default: 100)
+- `--verify-source-freshness` - Verify cache freshness before mirroring (default: false)
 
 **Namespace Filtering:**
 - `--excluded-namespaces string` - Comma-separated exclusion list
@@ -665,6 +666,7 @@ kubectl logs -n kubemirror-system -l app.kubernetes.io/name=kubemirror | grep "d
 - **Worker Pools:** Concurrent reconciliation with configurable parallelism
 - **Rate Limiting:** Protects API server with configurable QPS and burst
 - **Bounded Queues:** Prevents memory leaks under high load
+- **Cache Freshness Verification (Optional):** When `--verify-source-freshness=true`, compares cached source with direct API read to detect informer cache lag. Prevents mirroring stale data during the 5-20 second window after watch events. Trade-off: Extra API call when cache is stale, but guarantees data freshness (see [Cache Staleness](#cache-staleness) for details)
 
 ## Supported Resources
 
@@ -695,6 +697,32 @@ KubeMirror can mirror any namespaced Kubernetes resource that supports standard 
 | Namespace | ❌ Never | Cluster-scoped |
 
 **Auto-Discovery** automatically finds all supported resources. The deny list is comprehensive and prevents mirroring of dangerous or inappropriate resources.
+
+## Cache Staleness
+
+Kubernetes controllers use informer caches for performance. KubeMirror implements a hybrid strategy to handle cache lag:
+
+**The Problem:**
+1. Source Secret updated → Watch event arrives
+2. Reconciliation triggered immediately3. Controller reads from cache → **Gets stale data** (cache hasn't updated yet)
+4. Stale data mirrored to targets5. Cache updates 5-20 seconds later → But reconciliation already ran
+
+**The Solution (Optional):**
+
+Enable `--verify-source-freshness=true` to activate hybrid caching:
+1. Read from cache (fast)
+2. Make direct API call to verify freshness
+3. If resourceVersions differ → Use fresh API data
+4. If resourceVersions match → Use cached data
+
+**Trade-offs:**
+
+| Mode | API Calls | Data Freshness | Use Case |
+|------|-----------|----------------|----------|
+| **Default** (`false`) | 0 extra calls | Eventually consistent (5-20s lag) | Most deployments - 95%+ of updates propagate correctly |
+| **Freshness Verification** (`true`) | 1-2 extra calls per update | Always fresh | Critical secrets that must propagate immediately |
+
+**Recommendation:** Default mode is sufficient for most use cases. Enable freshness verification only for environments where stale data is unacceptable (e.g., security-critical secrets, zero-downtime deployments).
 
 ## Monitoring
 

@@ -33,18 +33,20 @@ func init() {
 
 func main() {
 	var (
-		metricsAddr          string
-		probeAddr            string
-		enableLeaderElection bool
-		leaderElectionID     string
-		excludedNamespaces   string
-		includedNamespaces   string
-		resourceTypes        string
-		discoveryInterval    time.Duration
-		maxTargets           int
-		workerThreads        int
-		rateLimitQPS         float64
-		rateLimitBurst       int
+		metricsAddr           string
+		probeAddr             string
+		enableLeaderElection  bool
+		leaderElectionID      string
+		excludedNamespaces    string
+		includedNamespaces    string
+		resourceTypes         string
+		discoveryInterval     time.Duration
+		maxTargets            int
+		workerThreads         int
+		rateLimitQPS          float64
+		rateLimitBurst        int
+		resyncPeriod          time.Duration
+		verifySourceFreshness bool
 	)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
@@ -71,6 +73,12 @@ func main() {
 		"QPS rate limit for API server requests.")
 	flag.IntVar(&rateLimitBurst, "rate-limit-burst", 100,
 		"Burst limit for API server requests.")
+	flag.DurationVar(&resyncPeriod, "resync-period", 30*time.Second,
+		"Period for resyncing all resources (catches updates missed due to informer cache delays).")
+	flag.BoolVar(&verifySourceFreshness, "verify-source-freshness", false,
+		"Verify source resource freshness by comparing cache with direct API read. "+
+			"Prevents mirroring stale data when cache lags behind watch events. "+
+			"Trade-off: Extra API call when cache is stale.")
 
 	opts := zap.Options{
 		Development: true,
@@ -95,6 +103,7 @@ func main() {
 		RateLimitBurst:        rateLimitBurst,
 		EnableAllKeyword:      true,
 		RequireNamespaceOptIn: false,
+		VerifySourceFreshness: verifySourceFreshness,
 		LeaderElection: config.LeaderElectionConfig{
 			Enabled:           enableLeaderElection,
 			ResourceName:      leaderElectionID,
@@ -218,6 +227,7 @@ func main() {
 			Filter:          namespaceFilter,
 			NamespaceLister: namespaceLister,
 			GVK:             gvk,
+			APIReader:       mgr.GetAPIReader(), // Direct API reader (bypasses cache)
 		}
 
 		if err = reconciler.SetupWithManagerForResourceType(mgr, gvk); err != nil {
@@ -228,7 +238,24 @@ func main() {
 		}
 	}
 
-	setupLog.Info("registered controllers", "count", len(cfg.MirroredResourceTypes))
+	setupLog.Info("registered source controllers", "count", len(cfg.MirroredResourceTypes))
+
+	// Register namespace reconciler to watch for new namespaces and label changes
+	namespaceReconciler := &controller.NamespaceReconciler{
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		Config:          cfg,
+		Filter:          namespaceFilter,
+		NamespaceLister: namespaceLister,
+		ResourceTypes:   cfg.MirroredResourceTypes,
+	}
+
+	if err = namespaceReconciler.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create namespace reconciler")
+		os.Exit(1)
+	}
+
+	setupLog.Info("registered namespace reconciler")
 
 	// Add health checks
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

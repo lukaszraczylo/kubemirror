@@ -55,3 +55,23 @@ func (k *KubernetesNamespaceLister) ListAllowMirrorsNamespaces(ctx context.Conte
 
 	return names, nil
 }
+
+// ListOptOutNamespaces returns namespaces that have explicitly opted out of mirrors.
+// These are namespaces with allow-mirrors="false".
+func (k *KubernetesNamespaceLister) ListOptOutNamespaces(ctx context.Context) ([]string, error) {
+	namespaceList := &corev1.NamespaceList{}
+
+	// List namespaces with allow-mirrors label set to false
+	if err := k.client.List(ctx, namespaceList, client.MatchingLabels{
+		constants.LabelAllowMirrors: "false",
+	}); err != nil {
+		return nil, err
+	}
+
+	names := make([]string, 0, len(namespaceList.Items))
+	for _, ns := range namespaceList.Items {
+		names = append(names, ns.Name)
+	}
+
+	return names, nil
+}

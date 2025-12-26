@@ -3,6 +3,7 @@ package hash
 import (
 	"testing"
 
+	"github.com/lukaszraczylo/kubemirror/pkg/constants"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -374,8 +375,8 @@ func TestNeedsSync(t *testing.T) {
 			},
 			target: &unstructured.Unstructured{},
 			targetAnnotations: map[string]string{
-				"source-generation":   "3",
-				"source-content-hash": "abc123",
+				constants.AnnotationSourceGeneration:  "3",
+				constants.AnnotationSourceContentHash: "abc123",
 			},
 			want:      true,
 			wantError: false,
@@ -387,8 +388,8 @@ func TestNeedsSync(t *testing.T) {
 			},
 			target: &corev1.Secret{},
 			targetAnnotations: map[string]string{
-				"source-generation":   "0",
-				"source-content-hash": mustComputeHash(t, &corev1.Secret{Data: map[string][]byte{"key": []byte("value")}}),
+				constants.AnnotationSourceGeneration:  "0",
+				constants.AnnotationSourceContentHash: mustComputeHash(t, &corev1.Secret{Data: map[string][]byte{"key": []byte("value")}}),
 			},
 			want:      false,
 			wantError: false,
@@ -400,7 +401,7 @@ func TestNeedsSync(t *testing.T) {
 			},
 			target: &corev1.ConfigMap{},
 			targetAnnotations: map[string]string{
-				"source-content-hash": "oldhash",
+				constants.AnnotationSourceContentHash: "oldhash",
 			},
 			want:      true,
 			wantError: false,

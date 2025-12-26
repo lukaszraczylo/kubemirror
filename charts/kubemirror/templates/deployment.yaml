@@ -43,6 +43,9 @@ spec:
             - --worker-threads={{ .Values.controller.workerThreads }}
             - --rate-limit-qps={{ .Values.controller.rateLimitQPS }}
             - --rate-limit-burst={{ .Values.controller.rateLimitBurst }}
+            {{- if .Values.controller.verifySourceFreshness }}
+            - --verify-source-freshness=true
+            {{- end }}
             {{- if .Values.controller.excludedNamespaces }}
             - --excluded-namespaces={{ .Values.controller.excludedNamespaces }}
             {{- end }}

@@ -60,6 +60,12 @@ controller:
   rateLimitQPS: 50.0
   rateLimitBurst: 100
 
+  # Cache freshness verification
+  # Compares cache with direct API read to detect informer cache lag
+  # Prevents mirroring stale data but adds extra API call when cache is stale
+  # Recommended: false for most deployments (eventual consistency is acceptable)
+  verifySourceFreshness: false
+
   # Namespace filtering
   excludedNamespaces: ""
   includedNamespaces: ""

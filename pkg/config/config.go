@@ -50,6 +50,10 @@ type Config struct {
 	EnableAllKeyword bool
 	// DryRun mode logs what would happen without actually making changes
 	DryRun bool
+	// VerifySourceFreshness checks cache staleness and re-fetches from API if needed
+	// Prevents mirroring stale data when cache hasn't updated yet after watch event
+	// Trades some API load for guaranteed data freshness
+	VerifySourceFreshness bool
 }
 
 // LeaderElectionConfig holds leader election settings.

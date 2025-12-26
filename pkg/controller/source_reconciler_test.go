@@ -129,6 +129,11 @@ func (m *MockNamespaceLister) ListAllowMirrorsNamespaces(ctx context.Context) ([
 	return args.Get(0).([]string), args.Error(1)
 }
 
+func (m *MockNamespaceLister) ListOptOutNamespaces(ctx context.Context) ([]string, error) {
+	args := m.Called(ctx)
+	return args.Get(0).([]string), args.Error(1)
+}
+
 func TestIsEnabledForMirroring(t *testing.T) {
 	tests := []struct {
 		obj  metav1.Object
@@ -277,6 +282,7 @@ func TestSourceReconciler_resolveTargetNamespaces(t *testing.T) {
 			if tt.expectListCalls {
 				mockLister.On("ListNamespaces", mock.Anything).Return(tt.allNamespaces, nil)
 				mockLister.On("ListAllowMirrorsNamespaces", mock.Anything).Return(tt.allowMirrorsNamespaces, nil)
+				mockLister.On("ListOptOutNamespaces", mock.Anything).Return([]string{}, nil)
 			}
 
 			r := &SourceReconciler{
@@ -441,6 +447,7 @@ func BenchmarkResolveTargetNamespaces(b *testing.B) {
 	}
 	mockLister.On("ListNamespaces", mock.Anything).Return(allNamespaces, nil)
 	mockLister.On("ListAllowMirrorsNamespaces", mock.Anything).Return(allNamespaces[:50], nil)
+	mockLister.On("ListOptOutNamespaces", mock.Anything).Return([]string{}, nil)
 
 	r := &SourceReconciler{
 		Config:          &config.Config{},
@@ -616,6 +623,7 @@ func TestSourceReconciler_Reconcile_AnnotationChange_AllToAllLabeled(t *testing.
 
 	mockLister.On("ListNamespaces", mock.Anything).Return(allNamespaces, nil)
 	mockLister.On("ListAllowMirrorsNamespaces", mock.Anything).Return(allowMirrorsNamespaces, nil)
+	mockLister.On("ListOptOutNamespaces", mock.Anything).Return([]string{}, nil)
 
 	// Mock Get for source
 	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "default", Name: "test-secret"}, mock.Anything).
@@ -739,6 +747,7 @@ func TestSourceReconciler_Reconcile_AnnotationChange_PatternChange(t *testing.T)
 
 	mockLister.On("ListNamespaces", mock.Anything).Return(allNamespaces, nil)
 	mockLister.On("ListAllowMirrorsNamespaces", mock.Anything).Return([]string{}, nil)
+	mockLister.On("ListOptOutNamespaces", mock.Anything).Return([]string{}, nil)
 
 	// Mock Get for source
 	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "default", Name: "app-config"}, mock.Anything).

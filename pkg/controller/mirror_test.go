@@ -368,6 +368,130 @@ func TestUpdateMirror_ConfigMap(t *testing.T) {
 	assert.NotEqual(t, "oldhash", mirror.Annotations[constants.AnnotationSourceContentHash])
 }
 
+func TestUpdateMirror_UnstructuredSecret(t *testing.T) {
+	// This test validates the fix for the bug where Unstructured Secrets
+	// would update annotations but not data fields during UpdateMirror
+	mirror := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]interface{}{
+				"name":      "test-secret",
+				"namespace": "app1",
+				"labels": map[string]interface{}{
+					constants.LabelManagedBy: constants.ControllerName,
+					constants.LabelMirror:    "true",
+				},
+				"annotations": map[string]interface{}{
+					constants.AnnotationSourceContentHash: "oldhash",
+				},
+			},
+			"type": "Opaque",
+			"data": map[string]interface{}{
+				"password": "b2xkLXZhbHVl", // base64 encoded "old-value"
+			},
+		},
+	}
+
+	source := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]interface{}{
+				"name":       "test-secret",
+				"namespace":  "default",
+				"generation": int64(10),
+			},
+			"type": "kubernetes.io/tls",
+			"data": map[string]interface{}{
+				"password": "bmV3LXZhbHVl", // base64 encoded "new-value"
+				"username": "YWRtaW4=",     // base64 encoded "admin"
+			},
+		},
+	}
+
+	err := UpdateMirror(mirror, source)
+	require.NoError(t, err)
+
+	// Verify data was updated (this was the bug - data wasn't being updated)
+	mirrorData, found, err := unstructured.NestedMap(mirror.Object, "data")
+	require.NoError(t, err)
+	require.True(t, found, "mirror should have data field")
+	sourceData, _, _ := unstructured.NestedMap(source.Object, "data")
+	assert.Equal(t, sourceData, mirrorData, "mirror data should match source data")
+
+	// Verify type was updated
+	mirrorType, found, err := unstructured.NestedString(mirror.Object, "type")
+	require.NoError(t, err)
+	require.True(t, found, "mirror should have type field")
+	assert.Equal(t, "kubernetes.io/tls", mirrorType, "mirror type should be updated")
+
+	// Verify annotations were updated
+	annotations := mirror.GetAnnotations()
+	assert.NotEqual(t, "oldhash", annotations[constants.AnnotationSourceContentHash], "hash should be updated")
+	assert.Equal(t, "10", annotations[constants.AnnotationSourceGeneration], "generation should be updated")
+	assert.NotEmpty(t, annotations[constants.AnnotationLastSyncTime], "sync time should be set")
+}
+
+func TestUpdateMirror_UnstructuredConfigMap(t *testing.T) {
+	// Test Unstructured ConfigMap to ensure data and binaryData are updated
+	mirror := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]interface{}{
+				"name":      "test-config",
+				"namespace": "app1",
+				"annotations": map[string]interface{}{
+					constants.AnnotationSourceContentHash: "oldhash",
+				},
+			},
+			"data": map[string]interface{}{
+				"key": "old-value",
+			},
+		},
+	}
+
+	source := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]interface{}{
+				"name":      "test-config",
+				"namespace": "default",
+			},
+			"data": map[string]interface{}{
+				"key":  "new-value",
+				"key2": "another-value",
+			},
+			"binaryData": map[string]interface{}{
+				"binary": "AAECAwQ=", // base64 binary data
+			},
+		},
+	}
+
+	err := UpdateMirror(mirror, source)
+	require.NoError(t, err)
+
+	// Verify data was updated
+	mirrorData, found, err := unstructured.NestedMap(mirror.Object, "data")
+	require.NoError(t, err)
+	require.True(t, found, "mirror should have data field")
+	sourceData, _, _ := unstructured.NestedMap(source.Object, "data")
+	assert.Equal(t, sourceData, mirrorData, "mirror data should match source data")
+
+	// Verify binaryData was updated
+	mirrorBinaryData, found, err := unstructured.NestedMap(mirror.Object, "binaryData")
+	require.NoError(t, err)
+	require.True(t, found, "mirror should have binaryData field")
+	sourceBinaryData, _, _ := unstructured.NestedMap(source.Object, "binaryData")
+	assert.Equal(t, sourceBinaryData, mirrorBinaryData, "mirror binaryData should match source binaryData")
+
+	// Verify annotations were updated
+	annotations := mirror.GetAnnotations()
+	assert.NotEqual(t, "oldhash", annotations[constants.AnnotationSourceContentHash], "hash should be updated")
+}
+
 func TestIsManagedByUs(t *testing.T) {
 	tests := []struct {
 		obj  metav1.Object
