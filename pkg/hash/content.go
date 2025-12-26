@@ -51,19 +51,37 @@ func extractContent(obj runtime.Object) (interface{}, error) {
 
 // extractSecretContent extracts content from a Secret.
 func extractSecretContent(secret *corev1.Secret) map[string]interface{} {
-	return map[string]interface{}{
+	content := map[string]interface{}{
 		"type":       string(secret.Type),
 		"data":       secret.Data,
 		"stringData": secret.StringData,
 	}
+
+	// Include transform annotation in hash so changes to transformation rules trigger updates
+	if secret.Annotations != nil {
+		if transform, exists := secret.Annotations[constants.AnnotationTransform]; exists {
+			content["transform"] = transform
+		}
+	}
+
+	return content
 }
 
 // extractConfigMapContent extracts content from a ConfigMap.
 func extractConfigMapContent(cm *corev1.ConfigMap) map[string]interface{} {
-	return map[string]interface{}{
+	content := map[string]interface{}{
 		"data":       cm.Data,
 		"binaryData": cm.BinaryData,
 	}
+
+	// Include transform annotation in hash so changes to transformation rules trigger updates
+	if cm.Annotations != nil {
+		if transform, exists := cm.Annotations[constants.AnnotationTransform]; exists {
+			content["transform"] = transform
+		}
+	}
+
+	return content
 }
 
 // extractUnstructuredContent extracts content from an unstructured resource (CRDs, etc.).
@@ -97,6 +115,14 @@ func extractUnstructuredContent(obj runtime.Object) (interface{}, error) {
 			if key != "metadata" && key != "status" && key != "apiVersion" && key != "kind" {
 				content[key] = value
 			}
+		}
+	}
+
+	// Include transform annotation in hash so changes to transformation rules trigger updates
+	annotations := uCopy.GetAnnotations()
+	if annotations != nil {
+		if transform, exists := annotations[constants.AnnotationTransform]; exists {
+			content["transform"] = transform
 		}
 	}
 

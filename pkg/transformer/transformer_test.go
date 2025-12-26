@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/lukaszraczylo/kubemirror/pkg/constants"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -30,7 +31,7 @@ func TestTransformer_Transform(t *testing.T) {
 					Name:      "test-config",
 					Namespace: "default",
 					Annotations: map[string]string{
-						AnnotationTransform: `
+						constants.AnnotationTransform: `
 rules:
   - path: data.LOG_LEVEL
     value: "error"
@@ -63,7 +64,7 @@ rules:
 					Name:      "test-config",
 					Namespace: "default",
 					Annotations: map[string]string{
-						AnnotationTransform: `
+						constants.AnnotationTransform: `
 rules:
   - path: data.API_URL
     template: "https://{{.TargetNamespace}}.api.example.com"
@@ -93,7 +94,7 @@ rules:
 					Name:      "test-config",
 					Namespace: "default",
 					Annotations: map[string]string{
-						AnnotationTransform: `
+						constants.AnnotationTransform: `
 rules:
   - path: data.NAMESPACE_UPPER
     template: "{{upper .TargetNamespace}}"
@@ -136,7 +137,7 @@ rules:
 						"app": "myapp",
 					},
 					Annotations: map[string]string{
-						AnnotationTransform: `
+						constants.AnnotationTransform: `
 rules:
   - path: metadata.labels
     merge:
@@ -165,7 +166,7 @@ rules:
 					Name:      "test-config",
 					Namespace: "default",
 					Annotations: map[string]string{
-						AnnotationTransform: `
+						constants.AnnotationTransform: `
 rules:
   - path: metadata.labels
     merge:
@@ -193,7 +194,7 @@ rules:
 					Name:      "test-config",
 					Namespace: "default",
 					Annotations: map[string]string{
-						AnnotationTransform: `
+						constants.AnnotationTransform: `
 rules:
   - path: data.DEBUG_MODE
     delete: true
@@ -227,8 +228,8 @@ rules:
 					Name:      "test-config",
 					Namespace: "default",
 					Annotations: map[string]string{
-						AnnotationTransform:       "invalid: yaml: [[[",
-						AnnotationTransformStrict: "true",
+						constants.AnnotationTransform:       "invalid: yaml: [[[",
+						constants.AnnotationTransformStrict: "true",
 					},
 				},
 				Data: map[string]string{},
@@ -247,11 +248,11 @@ rules:
 					Name:      "test-config",
 					Namespace: "default",
 					Annotations: map[string]string{
-						AnnotationTransform: `
+						constants.AnnotationTransform: `
 rules:
   - value: "something"
 `,
-						AnnotationTransformStrict: "true",
+						constants.AnnotationTransformStrict: "true",
 					},
 				},
 				Data: map[string]string{},
@@ -273,8 +274,8 @@ rules:
 						Name:      "test-config",
 						Namespace: "default",
 						Annotations: map[string]string{
-							AnnotationTransform:       rules,
-							AnnotationTransformStrict: "true",
+							constants.AnnotationTransform:       rules,
+							constants.AnnotationTransformStrict: "true",
 						},
 					},
 					Data: map[string]string{},
@@ -319,7 +320,7 @@ rules:
 					Name:      "test-config",
 					Namespace: "default",
 					Annotations: map[string]string{
-						AnnotationTransform: "invalid yaml [[[",
+						constants.AnnotationTransform: "invalid yaml [[[",
 					},
 				},
 				Data: map[string]string{
@@ -347,7 +348,7 @@ rules:
 					Name:      "test-config",
 					Namespace: "default",
 					Annotations: map[string]string{
-						AnnotationTransform: `
+						constants.AnnotationTransform: `
 rules:
   - path: data.KEY1
     value: "first"
@@ -402,7 +403,7 @@ rules:
 						"name":      "test-pod",
 						"namespace": "default",
 						"annotations": map[string]interface{}{
-							AnnotationTransform: `
+							constants.AnnotationTransform: `
 rules:
   - path: spec.containers[0].image
     template: "registry.{{.TargetNamespace}}.example.com/app:v1"
@@ -457,7 +458,7 @@ rules:
 					Name:      "test-config",
 					Namespace: "default",
 					Annotations: map[string]string{
-						AnnotationTransform: `
+						constants.AnnotationTransform: `
 rules:
   - path: data.VALUE
     template: "{{.TargetNamespace}}-empty"
@@ -1336,7 +1337,7 @@ rules:
 						"name":      "test-config",
 						"namespace": "source-namespace",
 						"annotations": map[string]interface{}{
-							AnnotationTransform: tt.rules,
+							constants.AnnotationTransform: tt.rules,
 						},
 					},
 				},

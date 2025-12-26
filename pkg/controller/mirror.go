@@ -404,7 +404,7 @@ func applyTransformations(source, mirror runtime.Object, targetNamespace string)
 		return mirror, nil
 	}
 
-	transformRules, hasTransform := sourceAnnotations[transformer.AnnotationTransform]
+	transformRules, hasTransform := sourceAnnotations[constants.AnnotationTransform]
 	if !hasTransform || transformRules == "" {
 		return mirror, nil // No transformation rules
 	}
@@ -422,9 +422,9 @@ func applyTransformations(source, mirror runtime.Object, targetNamespace string)
 	}
 
 	// Copy transform annotations from source
-	mirrorAnnotations[transformer.AnnotationTransform] = transformRules
-	if strictMode, hasStrict := sourceAnnotations[transformer.AnnotationTransformStrict]; hasStrict {
-		mirrorAnnotations[transformer.AnnotationTransformStrict] = strictMode
+	mirrorAnnotations[constants.AnnotationTransform] = transformRules
+	if strictMode, hasStrict := sourceAnnotations[constants.AnnotationTransformStrict]; hasStrict {
+		mirrorAnnotations[constants.AnnotationTransformStrict] = strictMode
 	}
 	mirrorObj.SetAnnotations(mirrorAnnotations)
 
@@ -443,8 +443,8 @@ func applyTransformations(source, mirror runtime.Object, targetNamespace string)
 	// Remove transform annotations from result (they shouldn't persist on mirrors)
 	if transformedObj, ok := transformed.(metav1.Object); ok {
 		annotations := transformedObj.GetAnnotations()
-		delete(annotations, transformer.AnnotationTransform)
-		delete(annotations, transformer.AnnotationTransformStrict)
+		delete(annotations, constants.AnnotationTransform)
+		delete(annotations, constants.AnnotationTransformStrict)
 		transformedObj.SetAnnotations(annotations)
 	}
 

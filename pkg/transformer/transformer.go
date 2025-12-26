@@ -11,14 +11,8 @@ import (
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-)
 
-const (
-	// AnnotationTransform is the annotation key for transformation rules
-	AnnotationTransform = "kubemirror.raczylo.com/transform"
-
-	// AnnotationTransformStrict enables strict mode (errors block mirroring)
-	AnnotationTransformStrict = "kubemirror.raczylo.com/transform-strict"
+	"github.com/lukaszraczylo/kubemirror/pkg/constants"
 )
 
 // Transformer applies transformation rules to Kubernetes resources.
@@ -93,7 +87,7 @@ func (t *Transformer) parseTransformRules(u *unstructured.Unstructured) (*Transf
 		return &TransformRules{}, nil
 	}
 
-	rulesYAML, exists := annotations[AnnotationTransform]
+	rulesYAML, exists := annotations[constants.AnnotationTransform]
 	if !exists || rulesYAML == "" {
 		return &TransformRules{}, nil
 	}
@@ -256,7 +250,7 @@ func (t *Transformer) isStrictMode(u *unstructured.Unstructured) bool {
 		return false
 	}
 
-	strictValue, exists := annotations[AnnotationTransformStrict]
+	strictValue, exists := annotations[constants.AnnotationTransformStrict]
 	return exists && (strictValue == "true" || strictValue == "1")
 }
 

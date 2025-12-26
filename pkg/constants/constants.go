@@ -84,6 +84,14 @@ const (
 	// AnnotationDeletionAttempts tracks number of failed deletion attempts.
 	AnnotationDeletionAttempts = Domain + "/deletion-attempts"
 
+	// Transformation Annotations
+
+	// AnnotationTransform contains YAML transformation rules for mirrored resources.
+	AnnotationTransform = Domain + "/transform"
+
+	// AnnotationTransformStrict enables strict mode (transformation errors block mirroring).
+	AnnotationTransformStrict = Domain + "/transform-strict"
+
 	// Finalizers
 
 	// FinalizerName is the finalizer added to source resources.
