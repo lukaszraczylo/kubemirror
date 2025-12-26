@@ -466,3 +466,88 @@ func BenchmarkResolveTargetNamespaces(b *testing.B) {
 		_, _ = r.resolveTargetNamespaces(ctx, sourceObj)
 	}
 }
+
+func TestSourceReconciler_cleanupOrphanedMirrors(t *testing.T) {
+	// Setup: Source in default namespace with mirrors in app-1, app-2, app-3
+	// Then target-namespaces changes to only app-1, app-2
+	// Expect: app-3 mirror is deleted (orphaned)
+
+	sourceObj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]interface{}{
+				"name":      "test-secret",
+				"namespace": "default",
+				"uid":       "source-uid-123",
+			},
+		},
+	}
+
+	// Mock existing mirror in app-3 (will be orphaned)
+	orphanedMirror := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]interface{}{
+				"name":      "test-secret",
+				"namespace": "app-3",
+				"labels": map[string]interface{}{
+					constants.LabelManagedBy: constants.ControllerName,
+					constants.LabelMirror:    "true",
+				},
+				"annotations": map[string]interface{}{
+					constants.AnnotationSourceNamespace: "default",
+					constants.AnnotationSourceName:      "test-secret",
+					constants.AnnotationSourceUID:       "source-uid-123",
+				},
+			},
+		},
+	}
+
+	mockClient := new(MockClient)
+	mockLister := new(MockNamespaceLister)
+
+	// Setup: all namespaces in cluster
+	allNamespaces := []string{"default", "app-1", "app-2", "app-3", "prod-1"}
+	mockLister.On("ListNamespaces", mock.Anything).Return(allNamespaces, nil)
+
+	// Current target list (after annotation change): only app-1 and app-2
+	targetNamespaces := []string{"app-1", "app-2"}
+
+	// The function will iterate through all namespaces and:
+	// - Skip "default" (source namespace)
+	// - Skip "app-1" and "app-2" (in target list)
+	// - Check "app-3" (not in target list) → will find orphaned mirror
+	// - Check "prod-1" (not in target list) → no mirror exists
+
+	notFoundErr := errors.NewNotFound(schema.GroupResource{Group: "", Resource: "secrets"}, "test-secret")
+
+	// app-3: orphaned mirror exists
+	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "app-3", Name: "test-secret"}, mock.Anything).
+		Return(nil, orphanedMirror)
+
+	// prod-1: no mirror exists
+	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "prod-1", Name: "test-secret"}, mock.Anything).
+		Return(notFoundErr, nil)
+
+	// Expect delete call for app-3 mirror
+	mockClient.On("Delete", mock.Anything, mock.MatchedBy(func(obj client.Object) bool {
+		u, ok := obj.(*unstructured.Unstructured)
+		return ok && u.GetNamespace() == "app-3" && u.GetName() == "test-secret"
+	}), mock.Anything).Return(nil)
+
+	r := &SourceReconciler{
+		Client:          mockClient,
+		NamespaceLister: mockLister,
+	}
+
+	ctx := context.Background()
+	deletedCount, err := r.cleanupOrphanedMirrors(ctx, sourceObj, targetNamespaces)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, deletedCount, "should have deleted 1 orphaned mirror")
+
+	mockClient.AssertExpectations(t)
+	mockLister.AssertExpectations(t)
+}

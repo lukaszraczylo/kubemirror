@@ -120,6 +120,15 @@ func (r *SourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 	}
 
+	// Clean up orphaned mirrors (namespaces that no longer match the target criteria)
+	orphanedCount, err := r.cleanupOrphanedMirrors(ctx, sourceObj, targetNamespaces)
+	if err != nil {
+		logger.Error(err, "failed to cleanup orphaned mirrors")
+		// Don't fail reconciliation for cleanup errors, just log them
+	} else if orphanedCount > 0 {
+		logger.Info("cleaned up orphaned mirrors", "count", orphanedCount)
+	}
+
 	// Update status annotation with last sync info
 	if err := r.updateLastSyncStatus(ctx, source, sourceObj, reconciledCount, errorCount); err != nil {
 		logger.Error(err, "failed to update sync status")
@@ -291,6 +300,81 @@ func (r *SourceReconciler) deleteAllMirrors(ctx context.Context, sourceObj metav
 
 	logger.Info("deleted mirrors", "count", deleteCount)
 	return nil
+}
+
+// cleanupOrphanedMirrors removes mirrors that exist but are no longer in the target list.
+// This handles cases where target-namespaces annotation changes (e.g., "all" → "all-labeled" or "app-*" → "prod-*").
+func (r *SourceReconciler) cleanupOrphanedMirrors(ctx context.Context, sourceObj metav1.Object, targetNamespaces []string) (int, error) {
+	logger := log.FromContext(ctx)
+
+	// List all namespaces
+	allNamespaces, err := r.NamespaceLister.ListNamespaces(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to list namespaces: %w", err)
+	}
+
+	// Get GVK from source object
+	sourceUnstructured, ok := sourceObj.(*unstructured.Unstructured)
+	if !ok {
+		return 0, fmt.Errorf("source object is not unstructured")
+	}
+
+	// Create a set of target namespaces for quick lookup
+	targetSet := make(map[string]bool)
+	for _, ns := range targetNamespaces {
+		targetSet[ns] = true
+	}
+
+	var deletedCount int
+	for _, ns := range allNamespaces {
+		// Skip source namespace
+		if ns == sourceObj.GetNamespace() {
+			continue
+		}
+
+		// Skip if this namespace IS in the current target list
+		if targetSet[ns] {
+			continue
+		}
+
+		// Check if a mirror exists in this namespace
+		mirror := &unstructured.Unstructured{}
+		mirror.SetGroupVersionKind(sourceUnstructured.GroupVersionKind())
+		mirror.SetNamespace(ns)
+		mirror.SetName(sourceObj.GetName())
+
+		err := r.Get(ctx, client.ObjectKey{Namespace: ns, Name: sourceObj.GetName()}, mirror)
+		if errors.IsNotFound(err) {
+			// No mirror exists, nothing to clean up
+			continue
+		}
+		if err != nil {
+			logger.Error(err, "failed to check for mirror", "namespace", ns)
+			continue
+		}
+
+		// Verify this is actually our mirror (not someone else's resource with the same name)
+		if !IsManagedByUs(mirror) {
+			continue
+		}
+
+		// Verify this mirror points to our source
+		srcNs, srcName, _, found := GetSourceReference(mirror)
+		if !found || srcNs != sourceObj.GetNamespace() || srcName != sourceObj.GetName() {
+			continue
+		}
+
+		// This is an orphaned mirror - delete it
+		if err := r.Delete(ctx, mirror); err != nil {
+			logger.Error(err, "failed to delete orphaned mirror", "namespace", ns)
+			continue
+		}
+
+		deletedCount++
+		logger.V(1).Info("deleted orphaned mirror", "namespace", ns)
+	}
+
+	return deletedCount, nil
 }
 
 // resolveTargetNamespaces determines which namespaces should receive mirrors.
