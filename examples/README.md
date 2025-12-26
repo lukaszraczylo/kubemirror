@@ -249,6 +249,137 @@ data:
   config: "value"
 ```
 
+## ExternalSecrets Integration
+
+KubeMirror integrates seamlessly with the [ExternalSecrets Operator](https://external-secrets.io/) to distribute secrets from external stores (1Password, Vault, AWS Secrets Manager, etc.) across multiple namespaces.
+
+### Overview
+
+The `externalsecret-dockerconfig.yaml` example demonstrates how to:
+1. Sync secrets from 1Password/Vault/etc using ExternalSecrets
+2. Mirror those secrets to multiple namespaces using KubeMirror
+3. Avoid race conditions between the two controllers
+
+### Prerequisites
+
+```bash
+# Install ExternalSecrets Operator
+helm repo add external-secrets https://charts.external-secrets.io
+helm install external-secrets external-secrets/external-secrets -n external-secrets-system --create-namespace
+
+# Configure your ClusterSecretStore (example for 1Password)
+kubectl apply -f your-clustersecretstore.yaml
+```
+
+### Quick Start
+
+```bash
+# Apply the ExternalSecret example
+kubectl apply -f examples/externalsecret-dockerconfig.yaml
+
+# Verify the source secret was created
+kubectl get secret multi-registry-secret -n default
+
+# Verify mirrors were created by KubeMirror
+kubectl get secrets --all-namespaces -l kubemirror.raczylo.com/mirror=true
+
+# Check sync status
+kubectl get secret multi-registry-secret -n default \
+  -o jsonpath='{.metadata.annotations.kubemirror\.raczylo\.com/sync-status}'
+```
+
+### Key Configuration
+
+**Ownership Model**
+
+KubeMirror uses **labels and annotations** to manage mirrors, not ownerReferences. This allows it to work with sources managed by any controller (ExternalSecrets, ArgoCD, etc.):
+
+```yaml
+target:
+  creationPolicy: Owner  # Source can be owned by ExternalSecrets
+  name: multi-registry-secret
+  template:
+    metadata:
+      labels:
+        kubemirror.raczylo.com/enabled: "true"  # KubeMirror detection
+      annotations:
+        kubemirror.raczylo.com/sync: "true"
+        kubemirror.raczylo.com/target-namespaces: "all"
+```
+
+**Separation of Concerns:**
+
+- **Source Secret**: Owned by ExternalSecrets (or any other controller) via `ownerReferences`
+- **Mirror Secrets**: Managed by KubeMirror via labels + annotations (no ownerReferences copied)
+- **Relationship**: Mirrors link to source via annotations (`source-namespace`, `source-name`, `source-uid`)
+- **Result**: Each controller manages its own resources independently
+
+### Examples in externalsecret-dockerconfig.yaml
+
+The example file contains three complete examples:
+
+1. **Docker Registry Credentials** - Mirrors Docker config to all namespaces using `target-namespaces: "all"`
+2. **Database Credentials** - Uses `all-labeled` for opt-in mirroring with namespace labels
+3. **Namespace with Opt-In Label** - Shows how to label namespaces to receive mirrors
+
+### Verification
+
+```bash
+# Check ExternalSecret status
+kubectl get externalsecret 1p-docker-config -n default
+
+# View the created secret
+kubectl get secret multi-registry-secret -n default -o yaml
+
+# Verify KubeMirror picked it up
+kubectl logs -n kubemirror-system -l app.kubernetes.io/name=kubemirror | grep multi-registry-secret
+
+# Count how many namespaces received the mirror
+kubectl get secrets --all-namespaces -l kubemirror.raczylo.com/mirror=true \
+  --field-selector metadata.name=multi-registry-secret | wc -l
+
+# Check a specific mirror
+kubectl get secret multi-registry-secret -n production-app -o yaml
+```
+
+### Testing Updates
+
+Test that ExternalSecrets refreshes propagate to all mirrors:
+
+```bash
+# Force ExternalSecret refresh
+kubectl annotate externalsecret 1p-docker-config -n default \
+  force-sync="$(date +%s)" --overwrite
+
+# Wait for ExternalSecret to sync (check status)
+kubectl get externalsecret 1p-docker-config -n default -w
+
+# Verify mirrors are updated (check generation or content hash)
+kubectl get secret multi-registry-secret -n production-app \
+  -o jsonpath='{.metadata.annotations.kubemirror\.raczylo\.com/source-content-hash}'
+```
+
+### Common Issues
+
+1. **Mirrors Not Created**
+   - Verify the secret has `kubemirror.raczylo.com/enabled: "true"` label
+   - Check that KubeMirror annotations are in the ExternalSecret template
+   - View controller logs: `kubectl logs -n kubemirror-system -l app.kubernetes.io/name=kubemirror`
+
+2. **ExternalSecret Not Syncing**
+   - Check ExternalSecret status: `kubectl describe externalsecret <name> -n <namespace>`
+   - Verify ClusterSecretStore is configured: `kubectl get clustersecretstore`
+   - Check external-secrets-operator logs
+
+### Alternative Backends
+
+The example includes commented configurations for:
+- AWS Secrets Manager
+- HashiCorp Vault
+- Google Secret Manager
+
+Uncomment and configure the ClusterSecretStore for your backend.
+
 ## Transformation Rules
 
 KubeMirror supports transformation rules that modify resources during mirroring. This enables environment-specific configurations, security hardening, and dynamic value generation.

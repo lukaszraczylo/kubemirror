@@ -155,6 +155,140 @@ func TestCreateMirror_Unstructured(t *testing.T) {
 	assert.Equal(t, "3", annotations[constants.AnnotationSourceGeneration])
 }
 
+func TestCreateMirror_Unstructured_StripsOwnerReferences(t *testing.T) {
+	// Create source with ownerReferences (e.g., managed by ExternalSecrets)
+	source := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]interface{}{
+				"name":            "external-secret",
+				"namespace":       "default",
+				"uid":             "secret-uid-123",
+				"resourceVersion": "100",
+				"generation":      int64(1),
+				// Source has ownerReferences (e.g., set by ExternalSecrets operator)
+				"ownerReferences": []interface{}{
+					map[string]interface{}{
+						"apiVersion": "external-secrets.io/v1",
+						"kind":       "ExternalSecret",
+						"name":       "1p-docker-config",
+						"uid":        "externalsecret-uid-456",
+						"controller": true,
+					},
+				},
+				// Source has finalizers
+				"finalizers": []interface{}{
+					"externalsecrets.external-secrets.io/externalsecret-cleanup",
+				},
+			},
+			"data": map[string]interface{}{
+				"password": "c2VjcmV0",
+			},
+		},
+	}
+
+	mirror, err := CreateMirror(source, "target-ns")
+	require.NoError(t, err)
+	require.NotNil(t, mirror)
+
+	uMirror, ok := mirror.(*unstructured.Unstructured)
+	require.True(t, ok, "mirror should be Unstructured")
+
+	// CRITICAL: Verify ownerReferences are NOT copied to mirror
+	ownerRefs := uMirror.GetOwnerReferences()
+	assert.Nil(t, ownerRefs, "mirror should not have ownerReferences from source")
+
+	// CRITICAL: Verify finalizers are NOT copied to mirror
+	finalizers := uMirror.GetFinalizers()
+	assert.Nil(t, finalizers, "mirror should not have finalizers from source")
+
+	// Verify mirror is properly managed by KubeMirror via labels/annotations
+	assert.Equal(t, constants.ControllerName, uMirror.GetLabels()[constants.LabelManagedBy])
+	assert.Equal(t, "true", uMirror.GetLabels()[constants.LabelMirror])
+	assert.Equal(t, "default", uMirror.GetAnnotations()[constants.AnnotationSourceNamespace])
+	assert.Equal(t, "external-secret", uMirror.GetAnnotations()[constants.AnnotationSourceName])
+	assert.Equal(t, "secret-uid-123", uMirror.GetAnnotations()[constants.AnnotationSourceUID])
+}
+
+func TestUpdateMirror_Unstructured_ClearsOwnerReferences(t *testing.T) {
+	// Create mirror that somehow has ownerReferences (e.g., from before the fix)
+	mirror := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "traefik.io/v1alpha1",
+			"kind":       "Middleware",
+			"metadata": map[string]interface{}{
+				"name":      "test-middleware",
+				"namespace": "target-ns",
+				"labels": map[string]interface{}{
+					constants.LabelManagedBy: constants.ControllerName,
+					constants.LabelMirror:    "true",
+				},
+				"annotations": map[string]interface{}{
+					constants.AnnotationSourceNamespace:   "default",
+					constants.AnnotationSourceName:        "test-middleware",
+					constants.AnnotationSourceContentHash: "oldhash",
+				},
+				// Mirror has ownerReferences (from before fix or external modification)
+				"ownerReferences": []interface{}{
+					map[string]interface{}{
+						"apiVersion": "external-secrets.io/v1",
+						"kind":       "ExternalSecret",
+						"name":       "1p-docker-config",
+						"uid":        "externalsecret-uid-456",
+					},
+				},
+				// Mirror has finalizers (from before fix or external modification)
+				"finalizers": []interface{}{
+					"some-finalizer",
+				},
+			},
+			"spec": map[string]interface{}{
+				"basicAuth": map[string]interface{}{
+					"secret": "old-secret",
+				},
+			},
+		},
+	}
+
+	source := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "traefik.io/v1alpha1",
+			"kind":       "Middleware",
+			"metadata": map[string]interface{}{
+				"name":       "test-middleware",
+				"namespace":  "default",
+				"generation": int64(2),
+			},
+			"spec": map[string]interface{}{
+				"basicAuth": map[string]interface{}{
+					"secret": "new-secret",
+				},
+			},
+		},
+	}
+
+	err := UpdateMirror(mirror, source)
+	require.NoError(t, err)
+
+	// CRITICAL: Verify ownerReferences are cleared from mirror
+	ownerRefs := mirror.GetOwnerReferences()
+	assert.Nil(t, ownerRefs, "mirror should not have ownerReferences after update")
+
+	// CRITICAL: Verify finalizers are cleared from mirror
+	finalizers := mirror.GetFinalizers()
+	assert.Nil(t, finalizers, "mirror should not have finalizers after update")
+
+	// Verify spec was updated
+	secret, found, err := unstructured.NestedString(mirror.Object, "spec", "basicAuth", "secret")
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "new-secret", secret)
+
+	// Verify hash was updated
+	assert.NotEqual(t, "oldhash", mirror.GetAnnotations()[constants.AnnotationSourceContentHash])
+}
+
 func TestUpdateMirror_Secret(t *testing.T) {
 	mirror := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{

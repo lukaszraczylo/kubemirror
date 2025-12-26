@@ -150,6 +150,11 @@ func createUnstructuredMirror(source runtime.Object, targetNamespace, sourceHash
 	mirror.SetGeneration(0)
 	mirror.SetCreationTimestamp(metav1.Time{})
 	mirror.SetFinalizers(nil) // Mirrors should not have finalizers
+	// IMPORTANT: Mirrors should never have ownerReferences from source.
+	// KubeMirror manages mirrors via labels/annotations, not ownership.
+	// This allows sources to be owned by other controllers (ExternalSecrets, ArgoCD, etc.)
+	// while KubeMirror independently manages the mirrors.
+	mirror.SetOwnerReferences(nil)
 
 	return mirror, nil
 }
@@ -317,6 +322,10 @@ func updateUnstructuredMirror(mirror, source runtime.Object, sourceHash string) 
 
 	// Ensure mirrors never have finalizers (even if they were added before this fix)
 	m.SetFinalizers(nil)
+
+	// Ensure mirrors never have ownerReferences (clean up mirrors from before this fix)
+	// KubeMirror uses labels/annotations for management, not ownerReferences
+	m.SetOwnerReferences(nil)
 
 	return nil
 }

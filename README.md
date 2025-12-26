@@ -17,8 +17,10 @@ Tested in production environments managing 1000+ mirrors across 200+ namespaces 
   - [Usage Examples](#usage-examples)
     - [Mirror a Secret to Specific Namespaces](#mirror-a-secret-to-specific-namespaces)
     - [Mirror to Pattern-Matched Namespaces](#mirror-to-pattern-matched-namespaces)
+    - [Mirror to All Namespaces](#mirror-to-all-namespaces)
     - [Mirror to All Labeled Namespaces](#mirror-to-all-labeled-namespaces)
     - [Mirror Custom Resources (CRDs)](#mirror-custom-resources-crds)
+    - [Using with ExternalSecrets Operator](#using-with-externalsecrets-operator)
   - [Configuration](#configuration)
     - [Helm Chart Values](#helm-chart-values)
     - [Command-line Flags](#command-line-flags)
@@ -65,9 +67,9 @@ KubeMirror solves this with:
 | **Resources** | Mirror any Kubernetes resource type - Secrets, ConfigMaps, Ingresses, Services, CRDs, and more |
 | **Resources** | Auto-discovery of all mirrorable resources with periodic refresh |
 | **Resources** | Safety deny list prevents mirroring dangerous resources (Pods, Events, Nodes) |
-| **Targeting** | Mirror to specific namespaces, pattern-matched namespaces (`app-*`), or all labeled namespaces |
+| **Targeting** | Mirror to specific namespaces, patterns (`app-*`), `all` namespaces, or `all-labeled` (opt-in) |
 | **Targeting** | Configurable maximum targets per source (default: 100) |
-| **Targeting** | Namespace opt-in required for "all-labeled" mirrors |
+| **Targeting** | `all-labeled` requires namespace opt-in via `kubemirror.raczylo.com/allow-mirrors` label |
 | **Sync** | Multi-layer change detection: generation field + SHA256 content hash |
 | **Sync** | Automatic drift detection and correction for manually modified mirrors |
 | **Sync** | Finalizer-based cleanup ensures mirrors are deleted with source |
@@ -207,7 +209,32 @@ data:
   api_url: "https://api.example.com"
 ```
 
+### Mirror to All Namespaces
+
+Use the `all` keyword to mirror to every namespace in the cluster (except the source):
+
+**Source Resource:**
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: global-config
+  namespace: default
+  labels:
+    kubemirror.raczylo.com/enabled: "true"
+  annotations:
+    kubemirror.raczylo.com/sync: "true"
+    kubemirror.raczylo.com/target-namespaces: "all"
+data:
+  cluster_name: "production"
+  region: "us-west-2"
+```
+
+> **⚠️ Use with caution:** The `all` keyword mirrors to ALL namespaces (including kube-system, kube-public, etc.) except the source namespace. Consider using `all-labeled` for safer opt-in behavior.
+
 ### Mirror to All Labeled Namespaces
+
+Use `all-labeled` for opt-in mirroring where target namespaces must explicitly allow mirrors:
 
 **Source Resource:**
 ```yaml
@@ -264,6 +291,88 @@ spec:
     excludedContentTypes:
       - text/event-stream
 ```
+
+### Using with ExternalSecrets Operator
+
+KubeMirror works seamlessly with the [ExternalSecrets Operator](https://external-secrets.io/) to distribute secrets from external stores (like 1Password, Vault, AWS Secrets Manager) across multiple namespaces.
+
+**Example - Distribute Docker Registry Credentials from 1Password:**
+
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: 1p-docker-config
+  namespace: default
+spec:
+  # Pull secrets from 1Password/Vault/etc
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: 1password-homecluster
+
+  target:
+    creationPolicy: Owner  # Standard ExternalSecrets setting - KubeMirror strips ownerReferences from mirrors
+    deletionPolicy: Retain
+    name: multi-registry-secret
+
+    # Include KubeMirror annotations in the secret template
+    template:
+      metadata:
+        labels:
+          kubemirror.raczylo.com/enabled: "true"
+        annotations:
+          kubemirror.raczylo.com/sync: "true"
+          kubemirror.raczylo.com/target-namespaces: "all"  # or specific namespaces
+
+      type: kubernetes.io/dockerconfigjson
+      data:
+        .dockerconfigjson: |
+          {
+            "auths": {
+              "ghcr.io": {
+                "username": "{{ .ghcrUsername | toString }}",
+                "auth": "{{ printf "%s:%s" .ghcrUsername .ghcrPassword | b64enc }}"
+              }
+            }
+          }
+
+  data:
+  - remoteRef:
+      key: DockerAuth/ghcrio_username
+    secretKey: ghcrUsername
+  - remoteRef:
+      key: DockerAuth/ghcrio_password
+    secretKey: ghcrPassword
+
+  refreshInterval: 24h
+```
+
+**How it Works:**
+
+1. **ExternalSecrets creates the source secret** with KubeMirror labels/annotations (source can be owned by any controller)
+2. **KubeMirror detects the source** via the `kubemirror.raczylo.com/enabled` label
+3. **KubeMirror creates mirrors** in target namespaces with:
+   - Labels identifying them as KubeMirror-managed mirrors
+   - Annotations linking back to the source (namespace, name, UID, content hash)
+   - **No ownerReferences** - preventing conflicts with source controllers
+4. **ExternalSecrets refreshes the source** every 24h, updating only the source secret
+5. **KubeMirror detects content changes** via hash comparison and updates all mirrors
+6. Each controller manages its own resources independently - no conflicts
+
+**Verification:**
+
+```bash
+# Check source secret was created by ExternalSecrets
+kubectl get secret multi-registry-secret -n default -o jsonpath='{.metadata.annotations}'
+
+# Verify mirrors were created by KubeMirror
+kubectl get secrets --all-namespaces -l kubemirror.raczylo.com/mirror=true
+
+# Check sync status on source
+kubectl get secret multi-registry-secret -n default -o jsonpath='{.metadata.annotations.kubemirror\.raczylo\.com/sync-status}'
+```
+
+See [examples/externalsecret-dockerconfig.yaml](examples/externalsecret-dockerconfig.yaml) for a complete working example.
 
 ### Transformation Rules
 

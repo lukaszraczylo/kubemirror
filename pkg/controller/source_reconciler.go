@@ -131,9 +131,9 @@ func (r *SourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		"errors", errorCount,
 		"total", len(targetNamespaces))
 
-	// Requeue if there were errors
+	// Return error if there were errors (controller-runtime will automatically requeue with exponential backoff)
 	if errorCount > 0 {
-		return ctrl.Result{Requeue: true}, fmt.Errorf("failed to reconcile %d/%d mirrors", errorCount, len(targetNamespaces))
+		return ctrl.Result{}, fmt.Errorf("failed to reconcile %d/%d mirrors", errorCount, len(targetNamespaces))
 	}
 
 	return ctrl.Result{}, nil
