@@ -19,8 +19,9 @@ The test suite uses a **data-driven framework** approach where test scenarios ar
 
 1. **common.sh**: Base utilities (logging, assertions, cleanup)
 2. **test-framework.sh**: DRY test framework functions (resource creation, updates, verification)
-3. **test-comprehensive.sh**: Comprehensive test scenarios using the framework
-4. **run-all-tests.sh**: Main test runner (builds binary, starts controller, runs tests)
+3. **test-comprehensive.sh**: Comprehensive test scenarios using the framework (supports selective execution)
+4. **test-parallel.sh**: Parallel test runner for faster execution (batches independent tests)
+5. **run-all-tests.sh**: Main test runner (builds binary, starts controller, runs tests)
 
 ### Test Framework Functions
 
@@ -47,7 +48,7 @@ verify_orphan_cleanup <type> <name> <namespace1> <namespace2> ...
 
 ## Comprehensive Test Suite
 
-The comprehensive test suite (`test-comprehensive.sh`) covers **22 systematic scenarios**:
+The comprehensive test suite (`test-comprehensive.sh`) covers **30 systematic scenarios**:
 
 ### Source Lifecycle Scenarios
 
@@ -88,11 +89,23 @@ The comprehensive test suite (`test-comprehensive.sh`) covers **22 systematic sc
 
 ### Resource Types
 
-All scenarios tested with both **Secrets** and **ConfigMaps**.
+23. **Mixed resource types**: ConfigMaps alongside Secrets
+24. **Custom Resource (Traefik Middleware)**: CRD mirroring
+
+### Transformation Scenarios (24-30)
+
+25. **Static value transformation**: Replace data values with static strings
+26. **Template transformation**: Use Go templates with context variables
+27. **Merge transformation**: Merge new data into existing fields
+28. **Delete transformation**: Remove specific fields
+29. **Multiple transformations**: Combine multiple rules
+30. **Strict mode**: Fail on transformation errors vs skip
+
+All basic scenarios tested with both **Secrets** and **ConfigMaps**.
 
 ## Running Tests
 
-### Run Complete Test Suite
+### Run Complete Test Suite (Sequential)
 
 ```bash
 cd e2e
@@ -103,21 +116,54 @@ This will:
 1. Check you're on docker-desktop context
 2. Build the KubeMirror binary
 3. Start the controller in background
-4. Run comprehensive test scenarios (22+ scenarios)
+4. Run comprehensive test scenarios (all 30 scenarios sequentially)
 5. Report detailed results with pass/fail for each
 6. Clean up all resources automatically
 
-### Run Individual Test Scenarios
+**Performance**: ~5-7 minutes for all 30 scenarios
+
+### Run Complete Test Suite (Parallel) - **FASTER** ⚡
+
+```bash
+cd e2e
+# Start controller first
+../kubemirror --max-targets=100 --worker-threads=5 > /tmp/kubemirror-test.log 2>&1 &
+
+# Run tests in parallel batches
+./test-parallel.sh
+```
+
+This runs independent tests in parallel batches:
+- **Sequential**: Scenarios 1-11 (core lifecycle - must run sequentially)
+- **Parallel Batch 1**: Scenarios 12-15 (namespace labels)
+- **Parallel Batch 2**: Scenarios 16-19 (deletion scenarios)
+- **Parallel Batch 3**: Scenarios 20-23 (mixed resources)
+- **Parallel Batch 4**: Scenarios 24-27 (transformations part 1)
+- **Parallel Batch 5**: Scenarios 28-30 (transformations part 2)
+
+**Performance**: ~3-4 minutes (40-50% faster than sequential)
+
+### Run Selective Scenarios
+
+Run only specific scenarios for faster iteration during development:
 
 ```bash
 # Must have KubeMirror controller running first
 cd /Users/nvm/Documents/projects/private/kube-mirror
 ./kubemirror --max-targets=100 --worker-threads=5 > /tmp/kubemirror-test.log 2>&1 &
 
-# Then run the test
+# Run only transformation tests (scenarios 24-30)
 cd e2e
-./test-comprehensive.sh
+./test-comprehensive.sh 24 25 26 27 28 29 30
+
+# Run only specific scenarios
+./test-comprehensive.sh 1 2 3
+
+# Run single scenario for debugging
+./test-comprehensive.sh 24
 ```
+
+**Performance**: <1 minute for a few scenarios
 
 ## Test Output
 
@@ -162,12 +208,17 @@ All tests passed!
 
 ## Test Resources
 
-Tests create temporary resources:
-- **Namespaces**: `e2e-*` prefixed
-- **Secrets**: `test-*` prefixed in default namespace
-- **ConfigMaps**: `test-*` prefixed in default namespace
+Tests create temporary resources with clear naming for isolation:
+- **Source Namespace**: `kubemirror-e2e-source` (dedicated namespace for all test source resources)
+- **Target Namespaces**: `kubemirror-e2e-*` prefixed (ns-1, ns-2, app-1, db-1, etc.)
+- **Secrets**: `test-*` prefixed in source namespace
+- **ConfigMaps**: `test-*` prefixed in source namespace
+- **CRDs**: Traefik Middleware resources for CRD testing
 
-All resources are cleaned up automatically on test completion.
+All resources are cleaned up automatically on test completion, including:
+- Automatic finalizer removal from source resources (prevents hanging deletions)
+- Cascade deletion of all target namespaces
+- Cleanup on test interruption (SIGINT/SIGTERM)
 
 ## Troubleshooting
 
@@ -292,7 +343,9 @@ verify_orphan_cleanup secret my-secret orphan-ns1 orphan-ns2
 | Pattern matching | 3 | New namespace creation, pattern changes, mixed explicit+pattern |
 | 'all' keyword opt-in | 4 | No label, add label, remove label, change true→false |
 | Edge cases | 5 | Namespace deletion, recreation, source deletion, target recreation |
-| **Total** | **22** | **All with Secrets and ConfigMaps** |
+| Resource types | 2 | Mixed ConfigMaps, Custom Resource (Traefik Middleware) |
+| Transformations | 7 | Static value, template, merge, delete, multiple, strict mode |
+| **Total** | **30** | **Comprehensive coverage with multiple resource types** |
 
 ## Test Methodology
 
@@ -372,23 +425,44 @@ kind delete cluster --name kubemirror-test
 
 ## Performance Notes
 
-- Comprehensive test suite: ~3-5 minutes
-- Controller startup: ~10 seconds
-- Resource reconciliation: typically <5 seconds per operation
-- Total assertions: 60+ across all scenarios
-- Each scenario includes setup, action, verification, and cleanup phases
+### Test Execution Times
+- **Sequential execution** (test-comprehensive.sh): ~5-7 minutes for all 30 scenarios
+- **Parallel execution** (test-parallel.sh): ~3-4 minutes for all 30 scenarios (40-50% faster)
+- **Selective execution** (few scenarios): <1 minute
+- **Controller startup**: ~10 seconds
+- **Resource reconciliation**: typically <5 seconds per operation
+
+### Test Coverage
+- **Total scenarios**: 30 comprehensive scenarios
+- **Total assertions**: 100+ across all scenarios
+- **Resource types tested**: Secrets, ConfigMaps, Traefik Middlewares (CRDs)
+- **Each scenario includes**: Setup, action, verification, and cleanup phases
+
+### Optimization Tips
+- Use `test-parallel.sh` for full test runs (40-50% faster)
+- Use selective execution during development: `./test-comprehensive.sh 24 25 26`
+- Run only affected scenarios after code changes
+- Parallel execution is safe - batches ensure test independence
 
 ## Test Isolation and Cleanup
 
 - **Automatic cleanup**: All resources cleaned up via trap handlers
-- **Namespace isolation**: Tests use `e2e-*` prefixed namespaces
-- **Sequential execution**: Tests run sequentially to avoid race conditions
+- **Namespace isolation**:
+  - Dedicated source namespace: `kubemirror-e2e-source`
+  - Target namespaces: `kubemirror-e2e-*` prefixed
+  - No pollution of `default` namespace
+- **Execution modes**:
+  - Sequential: All scenarios run in order (test-comprehensive.sh with no args)
+  - Parallel: Independent scenarios batched (test-parallel.sh)
+  - Selective: Run specific scenarios (test-comprehensive.sh 24 25 26)
 - **Idempotent**: Tests can be re-run without manual cleanup
-- **Resource labeling**: Test resources labeled for easy identification
+- **Resource labeling**: Test resources labeled `test-resource: e2e` for easy identification
+- **Finalizer handling**: Automatic finalizer removal prevents stuck resource deletions
 
 ## Known Limitations
 
 - Tests assume clean docker-desktop cluster (or equivalent local cluster)
 - Some scenarios require waiting for reconciliation (30s default timeout)
-- Tests are sequential (not parallel) to ensure deterministic behavior
 - Controller must be stopped between runs if running manually (run-all-tests.sh handles this)
+- Parallel execution requires sufficient cluster resources (5-6 tests may run concurrently)
+- Some scenarios depend on previous state (scenarios 1-11 must run sequentially)

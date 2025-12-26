@@ -16,7 +16,33 @@ permissions:
     packages: write
 
 jobs:
+    e2e-tests:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Set up Go
+              uses: actions/setup-go@v4
+              with:
+                  go-version: ">=1.25"
+
+            - name: Install dependencies
+              run: go mod download
+
+            - uses: engineerd/setup-kind@v0.6.2
+
+            - name: Run e2e tests
+              run: |
+                  # rename context to docker-desktop
+                  kubectl config rename-context "$(kubectl config current-context)" docker-desktop
+                  cd e2e
+                  ./run-all-tests.sh
+
     release:
+        needs: e2e-tests
         uses: lukaszraczylo/shared-actions/.github/workflows/go-release.yaml@main
         with:
             go-version: ">=1.25"

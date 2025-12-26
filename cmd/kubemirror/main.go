@@ -219,8 +219,8 @@ func main() {
 			"kind", gvk.Kind,
 		)
 
-		// Create a reconciler instance for this specific resource type
-		reconciler := &controller.SourceReconciler{
+		// Create a source reconciler instance for this specific resource type
+		sourceReconciler := &controller.SourceReconciler{
 			Client:          mgr.GetClient(),
 			Scheme:          mgr.GetScheme(),
 			Config:          cfg,
@@ -230,15 +230,30 @@ func main() {
 			APIReader:       mgr.GetAPIReader(), // Direct API reader (bypasses cache)
 		}
 
-		if err = reconciler.SetupWithManagerForResourceType(mgr, gvk); err != nil {
-			setupLog.Error(err, "unable to create controller",
+		if err = sourceReconciler.SetupWithManagerForResourceType(mgr, gvk); err != nil {
+			setupLog.Error(err, "unable to create source controller",
+				"resourceType", rt.String(),
+			)
+			os.Exit(1)
+		}
+
+		// Create a mirror reconciler instance for orphan detection
+		// This watches mirrored resources (with managed-by label) and verifies their source still exists
+		mirrorReconciler := &controller.MirrorReconciler{
+			Client: mgr.GetClient(),
+			Scheme: mgr.GetScheme(),
+			GVK:    gvk,
+		}
+
+		if err = mirrorReconciler.SetupWithManager(mgr, gvk); err != nil {
+			setupLog.Error(err, "unable to create mirror controller",
 				"resourceType", rt.String(),
 			)
 			os.Exit(1)
 		}
 	}
 
-	setupLog.Info("registered source controllers", "count", len(cfg.MirroredResourceTypes))
+	setupLog.Info("registered source and mirror controllers", "count", len(cfg.MirroredResourceTypes))
 
 	// Register namespace reconciler to watch for new namespaces and label changes
 	namespaceReconciler := &controller.NamespaceReconciler{

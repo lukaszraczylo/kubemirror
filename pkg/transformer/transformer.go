@@ -3,6 +3,7 @@ package transformer
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"text/template"
@@ -409,7 +410,20 @@ func setNestedField(obj map[string]interface{}, path []string, value interface{}
 		return fmt.Errorf("cannot set key %s on non-map %T", finalSegment, current)
 	}
 
-	currentMap[finalSegment] = value
+	// Special handling for Secret data fields
+	// Secrets require base64-encoded values in .data field
+	finalValue := value
+	if isSecretDataField(obj, path) {
+		// Convert value to string and base64-encode it
+		strValue, ok := value.(string)
+		if !ok {
+			// Try to convert to string
+			strValue = fmt.Sprintf("%v", value)
+		}
+		finalValue = base64Encode(strValue)
+	}
+
+	currentMap[finalSegment] = finalValue
 	return nil
 }
 
@@ -511,4 +525,28 @@ func templateFuncs() template.FuncMap {
 			return value
 		},
 	}
+}
+
+// isSecretDataField checks if the path points to a Secret's .data field.
+func isSecretDataField(obj map[string]interface{}, path []string) bool {
+	// Check if this is a Secret by looking at apiVersion and kind
+	kind, hasKind := obj["kind"]
+	apiVersion, hasAPI := obj["apiVersion"]
+
+	if !hasKind || !hasAPI {
+		return false
+	}
+
+	// Check if it's a Secret (kind=Secret, apiVersion=v1)
+	if kind != "Secret" || apiVersion != "v1" {
+		return false
+	}
+
+	// Check if path starts with "data"
+	return len(path) >= 1 && path[0] == "data"
+}
+
+// base64Encode encodes a string to base64.
+func base64Encode(s string) string {
+	return base64.StdEncoding.EncodeToString([]byte(s))
 }

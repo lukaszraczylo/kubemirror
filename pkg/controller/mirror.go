@@ -393,16 +393,59 @@ func GetSourceReference(mirror metav1.Object) (namespace, name, uid string, foun
 // applyTransformations applies transformation rules from the source to the mirror.
 // Returns the transformed mirror, or the original mirror if no rules are present.
 func applyTransformations(source, mirror runtime.Object, targetNamespace string) (runtime.Object, error) {
+	// Get source annotations to check for transform rules
+	sourceObj, ok := source.(metav1.Object)
+	if !ok {
+		return mirror, nil
+	}
+
+	sourceAnnotations := sourceObj.GetAnnotations()
+	if sourceAnnotations == nil {
+		return mirror, nil
+	}
+
+	transformRules, hasTransform := sourceAnnotations[transformer.AnnotationTransform]
+	if !hasTransform || transformRules == "" {
+		return mirror, nil // No transformation rules
+	}
+
+	// Temporarily copy transform annotations to mirror for Transform to read
+	// The Transform function reads rules from the object being transformed
+	mirrorObj, ok := mirror.(metav1.Object)
+	if !ok {
+		return mirror, nil
+	}
+
+	mirrorAnnotations := mirrorObj.GetAnnotations()
+	if mirrorAnnotations == nil {
+		mirrorAnnotations = make(map[string]string)
+	}
+
+	// Copy transform annotations from source
+	mirrorAnnotations[transformer.AnnotationTransform] = transformRules
+	if strictMode, hasStrict := sourceAnnotations[transformer.AnnotationTransformStrict]; hasStrict {
+		mirrorAnnotations[transformer.AnnotationTransformStrict] = strictMode
+	}
+	mirrorObj.SetAnnotations(mirrorAnnotations)
+
 	// Build transformation context
 	ctx := buildTransformContext(source, mirror, targetNamespace)
 
 	// Create transformer with default options
 	t := transformer.NewDefaultTransformer()
 
-	// Apply transformations (transformer handles case of no rules gracefully)
+	// Apply transformations (transformer reads rules from mirror's annotations now)
 	transformed, err := t.Transform(mirror, ctx)
 	if err != nil {
 		return nil, err
+	}
+
+	// Remove transform annotations from result (they shouldn't persist on mirrors)
+	if transformedObj, ok := transformed.(metav1.Object); ok {
+		annotations := transformedObj.GetAnnotations()
+		delete(annotations, transformer.AnnotationTransform)
+		delete(annotations, transformer.AnnotationTransformStrict)
+		transformedObj.SetAnnotations(annotations)
 	}
 
 	return transformed, nil

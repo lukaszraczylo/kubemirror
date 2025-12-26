@@ -15,7 +15,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -138,25 +137,50 @@ func (r *SourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	// Check if resource is enabled for mirroring
-	if !isEnabledForMirroring(sourceObj) {
-		// Silently skip - don't log as it would be too noisy
-		return r.handleDisabled(ctx, sourceObj)
+	// Check if resource is being deleted
+	if !sourceObj.GetDeletionTimestamp().IsZero() {
+		// Resource is being deleted - clean up mirrors and remove finalizer
+		if containsString(sourceObj.GetFinalizers(), constants.FinalizerName) {
+			logger.Info("source being deleted, cleaning up all mirrors")
+			if err := r.deleteAllMirrors(ctx, sourceObj); err != nil {
+				logger.Error(err, "failed to delete all mirrors during source deletion")
+				return ctrl.Result{}, err
+			}
+
+			// Remove finalizer to allow resource deletion
+			logger.Info("removing finalizer from source resource")
+			finalizers := removeString(sourceObj.GetFinalizers(), constants.FinalizerName)
+			sourceObj.SetFinalizers(finalizers)
+			if err := r.Update(ctx, source); err != nil {
+				logger.Error(err, "failed to remove finalizer")
+				return ctrl.Result{}, err
+			}
+			logger.Info("finalizer removed, resource can now be deleted")
+		}
+		return ctrl.Result{}, nil
 	}
 
-	// Handle deletion
-	if !sourceObj.GetDeletionTimestamp().IsZero() {
-		return r.handleDeletion(ctx, source, sourceObj)
+	if !isEnabledForMirroring(sourceObj) {
+		// Resource is disabled - remove finalizer if present and delete all mirrors
+		if containsString(sourceObj.GetFinalizers(), constants.FinalizerName) {
+			return r.handleDisabled(ctx, sourceObj)
+		}
+		// No finalizer, just skip
+		return ctrl.Result{}, nil
 	}
 
 	// Add finalizer if not present
-	// source (*unstructured.Unstructured) already implements client.Object
-	if !controllerutil.ContainsFinalizer(source, constants.FinalizerName) {
-		controllerutil.AddFinalizer(source, constants.FinalizerName)
+	if !containsString(sourceObj.GetFinalizers(), constants.FinalizerName) {
+		logger.Info("adding finalizer to source resource")
+		finalizers := append(sourceObj.GetFinalizers(), constants.FinalizerName)
+		sourceObj.SetFinalizers(finalizers)
 		if err := r.Update(ctx, source); err != nil {
 			logger.Error(err, "failed to add finalizer")
 			return ctrl.Result{}, err
 		}
-		logger.V(1).Info("added finalizer")
+		logger.Info("finalizer added")
+		// Requeue to continue with reconciliation after finalizer is added
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// Get target namespaces
@@ -212,57 +236,32 @@ func (r *SourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	return ctrl.Result{}, nil
 }
 
-// handleDeletion removes finalizer after cleaning up all mirrors.
-func (r *SourceReconciler) handleDeletion(ctx context.Context, source runtime.Object, sourceObj metav1.Object) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-
-	// source (*unstructured.Unstructured) already implements client.Object
-	sourceUnstructured := source.(*unstructured.Unstructured)
-	if !controllerutil.ContainsFinalizer(sourceUnstructured, constants.FinalizerName) {
-		return ctrl.Result{}, nil
-	}
-
-	// Delete all mirrors
-	if err := r.deleteAllMirrors(ctx, sourceObj); err != nil {
-		logger.Error(err, "failed to delete mirrors")
-		return ctrl.Result{}, err
-	}
-
-	// Remove finalizer
-	controllerutil.RemoveFinalizer(sourceUnstructured, constants.FinalizerName)
-	if err := r.Update(ctx, sourceUnstructured); err != nil {
-		logger.Error(err, "failed to remove finalizer")
-		return ctrl.Result{}, err
-	}
-
-	logger.Info("finalizer removed, mirrors deleted")
-	return ctrl.Result{}, nil
-}
-
 // handleDisabled removes mirrors when a resource is disabled.
 func (r *SourceReconciler) handleDisabled(ctx context.Context, sourceObj metav1.Object) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// Source is already a client.Object (unstructured implements it)
-	sourceClient := sourceObj.(client.Object)
+	// Delete all mirrors for this disabled source
+	if err := r.deleteAllMirrors(ctx, sourceObj); err != nil {
+		logger.Error(err, "failed to delete mirrors for disabled resource")
+		return ctrl.Result{}, err
+	}
 
-	// If resource has finalizer, clean up mirrors and remove it
-	if controllerutil.ContainsFinalizer(sourceClient, constants.FinalizerName) {
-		if err := r.deleteAllMirrors(ctx, sourceObj); err != nil {
-			logger.Error(err, "failed to delete mirrors for disabled resource")
-			return ctrl.Result{}, err
-		}
+	// Remove finalizer if present
+	if containsString(sourceObj.GetFinalizers(), constants.FinalizerName) {
+		logger.Info("removing finalizer from disabled resource")
+		finalizers := removeString(sourceObj.GetFinalizers(), constants.FinalizerName)
+		sourceObj.SetFinalizers(finalizers)
 
-		// Remove finalizer
-		controllerutil.RemoveFinalizer(sourceClient, constants.FinalizerName)
-		if err := r.Update(ctx, sourceClient); err != nil {
+		// Get the unstructured object to update - sourceObj is already *unstructured.Unstructured
+		source := sourceObj.(*unstructured.Unstructured)
+		if err := r.Update(ctx, source); err != nil {
 			logger.Error(err, "failed to remove finalizer from disabled resource")
 			return ctrl.Result{}, err
 		}
-
-		logger.Info("mirrors deleted and finalizer removed for disabled resource")
+		logger.V(1).Info("finalizer removed from disabled resource")
 	}
 
+	logger.V(1).Info("mirrors deleted for disabled resource")
 	return ctrl.Result{}, nil
 }
 
@@ -559,12 +558,10 @@ func (r *SourceReconciler) SetupWithManagerForResourceType(
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(gvk)
 
-	// Create unique controller name including version to avoid collisions
-	// e.g., "HorizontalPodAutoscaler.v1.autoscaling"
-	controllerName := gvk.Kind + "." + gvk.Version
-	if gvk.Group != "" {
-		controllerName += "." + gvk.Group
-	}
+	// Create unique controller name including version and group to avoid collisions
+	// e.g., "HorizontalPodAutoscaler.v1.autoscaling" or "Secret.v1." (empty group for core resources)
+	// This matches the naming convention used by mirror reconcilers
+	controllerName := gvk.Kind + "." + gvk.Version + "." + gvk.Group
 
 	// Create mirror object for watching
 	mirrorObj := &unstructured.Unstructured{}
@@ -612,4 +609,25 @@ func (r *SourceReconciler) mapMirrorToSource(ctx context.Context, obj client.Obj
 			},
 		},
 	}
+}
+
+// containsString checks if a slice contains a string.
+func containsString(slice []string, s string) bool {
+	for _, item := range slice {
+		if item == s {
+			return true
+		}
+	}
+	return false
+}
+
+// removeString removes a string from a slice.
+func removeString(slice []string, s string) []string {
+	result := make([]string, 0, len(slice))
+	for _, item := range slice {
+		if item != s {
+			result = append(result, item)
+		}
+	}
+	return result
 }
