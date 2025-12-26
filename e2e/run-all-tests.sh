@@ -65,7 +65,7 @@ main() {
         --max-targets=100 \
         --worker-threads=5 \
         --verify-source-freshness=true \
-        > "$KUBEMIRROR_LOG" 2>&1 &
+        >"$KUBEMIRROR_LOG" 2>&1 &
 
     KUBEMIRROR_PID=$!
 
@@ -86,7 +86,7 @@ main() {
     # Check health endpoint
     local retries=0
     while [ $retries -lt 10 ]; do
-        if curl -s http://localhost:8081/healthz > /dev/null 2>&1; then
+        if curl -s http://localhost:8081/healthz >/dev/null 2>&1; then
             log_success "Controller is healthy"
             break
         fi
@@ -120,6 +120,8 @@ main() {
     echo "  - Orphaned mirror cleanup"
     echo "  - Namespace creation/deletion/label changes"
     echo ""
+
+    kubectl apply -f https://raw.githubusercontent.com/traefik/traefik/master/docs/content/reference/dynamic-configuration/kubernetes-crd-definition-v1.yml
 
     if bash "$SCRIPT_DIR/test-comprehensive.sh"; then
         log_success "Comprehensive Test Suite PASSED"
