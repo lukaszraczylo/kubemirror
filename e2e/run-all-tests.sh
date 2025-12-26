@@ -54,8 +54,13 @@ main() {
 
     log_success "KubeMirror binary built successfully"
 
-    # Step 3: Start KubeMirror controller
-    log_info "Step 3: Starting KubeMirror controller"
+    # Step 3: Install Traefik CRDs (needed for scenario 23)
+    log_info "Step 3: Installing Traefik CRDs"
+    kubectl apply -f https://raw.githubusercontent.com/traefik/traefik/master/docs/content/reference/dynamic-configuration/kubernetes-crd-definition-v1.yml
+    log_success "Traefik CRDs installed"
+
+    # Step 4: Start KubeMirror controller
+    log_info "Step 4: Starting KubeMirror controller"
 
     rm -f "$KUBEMIRROR_LOG"
 
@@ -101,8 +106,8 @@ main() {
     # Give controller time to set up watches
     sleep 5
 
-    # Step 4: Run test suites
-    log_info "Step 4: Running test suites"
+    # Step 5: Run test suites
+    log_info "Step 5: Running test suites"
     echo ""
 
     local test_results=0
@@ -121,8 +126,6 @@ main() {
     echo "  - Namespace creation/deletion/label changes"
     echo ""
 
-    kubectl apply -f https://raw.githubusercontent.com/traefik/traefik/master/docs/content/reference/dynamic-configuration/kubernetes-crd-definition-v1.yml
-
     if bash "$SCRIPT_DIR/test-comprehensive.sh"; then
         log_success "Comprehensive Test Suite PASSED"
     else
@@ -131,7 +134,7 @@ main() {
     fi
     echo ""
 
-    # Step 5: Final summary
+    # Step 6: Final summary
     echo "======================================"
     echo "E2E Test Run Complete"
     echo "======================================"
