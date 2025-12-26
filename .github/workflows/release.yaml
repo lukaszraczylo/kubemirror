@@ -1,71 +1,75 @@
 name: Release
 
 on:
-  workflow_dispatch:
-  push:
-    tags:
-      - 'v*'
+    workflow_dispatch:
+    push:
+        paths-ignore:
+            - "**.md"
+            - "docs/**"
+            - "examples/**"
+        branches:
+            - main
 
 permissions:
-  id-token: write
-  contents: write
-  packages: write
+    id-token: write
+    contents: write
+    packages: write
 
 jobs:
-  release:
-    uses: lukaszraczylo/shared-actions/.github/workflows/go-release.yaml@main
-    with:
-      go-version: ">=1.25"
-      docker-enabled: true
-    secrets: inherit
-
-  publish-helm-chart:
-    needs: release
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    release:
+        uses: lukaszraczylo/shared-actions/.github/workflows/go-release.yaml@main
         with:
-          fetch-depth: 0
+            go-version: ">=1.25"
+            docker-enabled: true
+        secrets: inherit
 
-      - name: Get release version
-        id: version
-        run: |
-          VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
-          VERSION=${VERSION#v}
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+    publish-helm-chart:
+        needs: release
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
 
-      - name: Trigger helm-charts release
-        env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          gh api repos/lukaszraczylo/helm-charts/dispatches \
-            -f event_type=release-chart \
-            -f client_payload[chart_name]=kubemirror \
-            -f client_payload[version]="$RELEASE_VERSION" \
-            -f client_payload[source_repo]=lukaszraczylo/kubemirror \
-            -f client_payload[chart_path]=charts/kubemirror
+            - name: Get release version
+              id: version
+              run: |
+                  VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
+                  VERSION=${VERSION#v}
+                  echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-  publish-website:
-    needs: release
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+            - name: Trigger helm-charts release
+              env:
+                  GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+                  RELEASE_VERSION: ${{ steps.version.outputs.version }}
+              run: |
+                  gh api repos/lukaszraczylo/helm-charts/dispatches \
+                    -f event_type=release-chart \
+                    -f client_payload[chart_name]=kubemirror \
+                    -f client_payload[version]="$RELEASE_VERSION" \
+                    -f client_payload[source_repo]=lukaszraczylo/kubemirror \
+                    -f client_payload[chart_path]=charts/kubemirror
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
+    publish-website:
+        needs: release
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            pages: write
+            id-token: write
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
 
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: './docs'
+            - name: Setup Pages
+              uses: actions/configure-pages@v5
 
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+            - name: Upload artifact
+              uses: actions/upload-pages-artifact@v3
+              with:
+                  path: "./docs"
+
+            - name: Deploy to GitHub Pages
+              id: deployment
+              uses: actions/deploy-pages@v4
