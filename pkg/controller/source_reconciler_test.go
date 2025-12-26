@@ -580,6 +580,9 @@ func TestSourceReconciler_Reconcile_AnnotationChange_AllToAllLabeled(t *testing.
 					constants.AnnotationSync:             "true",
 					constants.AnnotationTargetNamespaces: "all-labeled", // Changed from "all"
 				},
+				"finalizers": []interface{}{
+					constants.FinalizerName,
+				},
 			},
 			"data": map[string]interface{}{
 				"password": "c2VjcmV0",
@@ -706,6 +709,9 @@ func TestSourceReconciler_Reconcile_AnnotationChange_PatternChange(t *testing.T)
 				"annotations": map[string]interface{}{
 					constants.AnnotationSync:             "true",
 					constants.AnnotationTargetNamespaces: "prod-*", // Changed from "app-*"
+				},
+				"finalizers": []interface{}{
+					constants.FinalizerName,
 				},
 			},
 			"data": map[string]interface{}{
