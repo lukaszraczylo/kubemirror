@@ -46,6 +46,10 @@ spec:
             {{- if .Values.controller.verifySourceFreshness }}
             - --verify-source-freshness=true
             {{- end }}
+            {{- if .Values.controller.lazyWatcherInit }}
+            - --lazy-watcher-init=true
+            {{- end }}
+            - --watcher-scan-interval={{ .Values.controller.watcherScanInterval }}
             {{- if .Values.controller.excludedNamespaces }}
             - --excluded-namespaces={{ .Values.controller.excludedNamespaces }}
             {{- end }}
@@ -56,6 +60,7 @@ spec:
             - --resource-types={{ join "," .Values.controller.resourceTypes }}
             {{- end }}
             - --discovery-interval={{ .Values.controller.discoveryInterval }}
+            - --resync-period={{ .Values.controller.resyncPeriod }}
           ports:
             - name: metrics
               containerPort: 8080

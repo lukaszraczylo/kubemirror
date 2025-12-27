@@ -67,6 +67,7 @@ func TestIsDeniedResourceType(t *testing.T) {
 		{name: "Lease", kind: "Lease", want: true},
 		{name: "Namespace", kind: "Namespace", want: true},
 		{name: "ClusterRole", kind: "ClusterRole", want: true},
+		{name: "Certificate", kind: "Certificate", want: true}, // cert-manager resources are denied
 
 		// Should NOT be denied
 		{name: "Secret", kind: "Secret", want: false},
@@ -76,7 +77,6 @@ func TestIsDeniedResourceType(t *testing.T) {
 		{name: "Deployment", kind: "Deployment", want: false},
 		{name: "StatefulSet", kind: "StatefulSet", want: false},
 		{name: "Middleware", kind: "Middleware", want: false},
-		{name: "Certificate", kind: "Certificate", want: false},
 	}
 
 	for _, tt := range tests {

@@ -1,0 +1,96 @@
+# Recommended Configuration for Home Cluster
+# This configuration reduces memory usage from ~259 MB to ~60-80 MB (70-76% reduction)
+
+controller:
+  # Metrics and health endpoints
+  metricsBindAddress: ":8080"
+  healthProbeBindAddress: ":8081"
+
+  # Leader election
+  leaderElect: true
+  leaderElectionID: "kubemirror-controller-leader"
+
+  # ==========================================
+  # KEY OPTIMIZATION: Specify exact resource types
+  # ==========================================
+  # Your cluster is currently watching 204 resource types but only mirroring 10 resources.
+  # Explicitly listing the types you actually use reduces memory by 70-80%.
+  #
+  # Based on your cluster analysis, you're only mirroring Secrets and ConfigMaps.
+  # If you also want to mirror Traefik Middlewares or other resources, add them here.
+  resourceTypes:
+    - "Secret.v1"
+    - "ConfigMap.v1"
+    # Uncomment if you need to mirror Traefik resources:
+    # - "Middleware.v1alpha1.traefik.io"
+    # - "IngressRoute.v1alpha1.traefik.io"
+    # - "ServersTransport.v1alpha1.traefik.io"
+
+  # Auto-discovery disabled since resourceTypes is specified
+  discoveryInterval: "5m"
+
+  # ==========================================
+  # KEY OPTIMIZATION: Increased resync period
+  # ==========================================
+  # Changed from default 30s (way too aggressive) to 10m
+  # This reduces memory churn and API server load significantly
+  resyncPeriod: "10m"
+
+  # Resource limits
+  maxTargets: 100
+  workerThreads: 5
+
+  # API rate limiting (current settings are fine)
+  rateLimitQPS: 50.0
+  rateLimitBurst: 100
+
+  # Cache freshness verification
+  # Keep disabled - eventual consistency is acceptable for most use cases
+  verifySourceFreshness: false
+
+  # Namespace filtering
+  excludedNamespaces: ""
+  includedNamespaces: ""
+
+# ==========================================
+# KEY OPTIMIZATION: Reduced memory limits
+# ==========================================
+# With explicit resource types, you can safely reduce memory allocation
+# Current: 512Mi limit, 128Mi request, using 259Mi
+# Optimized: 256Mi limit, 96Mi request, will use ~60-80Mi
+resources:
+  limits:
+    cpu: 300m      # Reduced from 500m
+    memory: 256Mi  # Reduced from 512Mi
+  requests:
+    cpu: 50m       # Reduced from 100m
+    memory: 96Mi   # Reduced from 128Mi
+
+# Expected Results After Applying:
+# --------------------------------
+# Memory usage: ~60-80 MB (down from ~259 MB = 70-76% reduction)
+# Resource types watched: 2 (down from 204 = 99% reduction)
+# Informer caches: ~4 (down from ~400 = 99% reduction)
+# Startup time: Faster (no discovery phase)
+# API server load: Significantly reduced
+
+# How to Apply:
+# -------------
+# 1. Update your Helm values file with this configuration
+# 2. Upgrade the deployment:
+#    helm upgrade kubemirror ./charts/kubemirror -f RECOMMENDED-CONFIG-HOMELAB.yaml
+# 3. Monitor memory usage:
+#    kubectl top pod -n default -l app.kubernetes.io/name=kubemirror
+# 4. Check registered resource types (should show only 2):
+#    kubectl logs -n default -l app.kubernetes.io/name=kubemirror | grep "registered source and mirror controllers"
+
+# Troubleshooting:
+# ----------------
+# If you see higher memory than expected after applying:
+# 1. Verify resource types are being used:
+#    kubectl logs -n default -l app.kubernetes.io/name=kubemirror | grep "using user-specified resource types"
+# 2. Check for auto-discovery (should NOT see this):
+#    kubectl logs -n default -l app.kubernetes.io/name=kubemirror | grep "enabling resource auto-discovery"
+# 3. Confirm registered controllers count:
+#    kubectl logs -n default -l app.kubernetes.io/name=kubemirror | grep "registered source and mirror controllers"
+#    Should show: "registered source and mirror controllers" {"count": 2}

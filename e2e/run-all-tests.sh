@@ -70,6 +70,8 @@ main() {
         --max-targets=100 \
         --worker-threads=5 \
         --verify-source-freshness=true \
+        --lazy-watcher-init=true \
+        --watcher-scan-interval=500ms \
         >"$KUBEMIRROR_LOG" 2>&1 &
 
     KUBEMIRROR_PID=$!
@@ -134,6 +136,24 @@ main() {
     fi
     echo ""
 
+    # # Lazy Watcher Initialization Test
+    # echo "======================================"
+    # echo "Running Lazy Watcher Initialization Test"
+    # echo "======================================"
+    # echo "This will test:"
+    # echo "  - Initial state with minimal controllers registered"
+    # echo "  - Dynamic controller registration on resource creation"
+    # echo "  - Memory efficiency of lazy initialization"
+    # echo ""
+
+    # if bash "$SCRIPT_DIR/test-lazy-watcher-init.sh"; then
+    #     log_success "Lazy Watcher Test PASSED"
+    # else
+    #     log_fail "Lazy Watcher Test FAILED"
+    #     test_results=1
+    # fi
+    # echo ""
+
     # Step 6: Final summary
     echo "======================================"
     echo "E2E Test Run Complete"
@@ -146,8 +166,8 @@ main() {
     else
         echo -e "${RED}Some test suites failed!${NC}"
         log_info "Controller log available at: $KUBEMIRROR_LOG"
-        log_info "Last 50 lines of controller log:"
-        tail -50 "$KUBEMIRROR_LOG"
+        log_info "Last 10 lines of controller log:"
+        tail -10 "$KUBEMIRROR_LOG"
         return 1
     fi
 }

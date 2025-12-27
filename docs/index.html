@@ -9,125 +9,140 @@
             content="Copy Secrets, ConfigMaps, and any Custom Resource across Kubernetes namespaces automatically. Transform values per environment. Better replacement for Reflector."
         />
         <script src="https://cdn.tailwindcss.com"></script>
+        <script>
+            tailwind.config = {
+                darkMode: 'class'
+            }
+        </script>
         <link
             rel="stylesheet"
             href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
         />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+            rel="stylesheet"
+        />
         <style>
+            body { font-family: "Inter", sans-serif; }
+            code, pre { font-family: "JetBrains Mono", monospace; }
+            .theme-transition {
+                transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+            }
+            @keyframes fadeInUp {
+                from { opacity: 0; transform: translateY(20px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            @keyframes float {
+                0%, 100% { transform: translateY(0px); }
+                50% { transform: translateY(-10px); }
+            }
+            .animate-fade-in-up { animation: fadeInUp 0.6s ease-out; }
+            .animate-float { animation: float 3s ease-in-out infinite; }
+            .glass {
+                background: rgba(255, 255, 255, 0.7);
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+            }
+            .dark .glass {
+                background: rgba(17, 24, 39, 0.7);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+            }
             .gradient-text {
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 -webkit-background-clip: text;
                 -webkit-text-fill-color: transparent;
                 background-clip: text;
             }
-            .hover-lift {
-                transition: transform 0.3s ease, box-shadow 0.3s ease;
+            .dark .gradient-text {
+                background: linear-gradient(135deg, #818cf8 0%, #c084fc 100%);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-clip: text;
             }
-            .hover-lift:hover {
-                transform: translateY(-5px);
-                box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
-            }
+            .shadow-modern { box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.1); }
+            .dark .shadow-modern { box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.4); }
             .code-block {
                 background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
             }
-
-            /* Fade-in animation */
-            @keyframes fadeInUp {
-                from {
-                    opacity: 0;
-                    transform: translateY(30px);
-                }
-                to {
+            .dark .code-block {
+                background: linear-gradient(135deg, #0f172a 0%, #020617 100%);
+            }
+            html { scroll-behavior: smooth; }
+            .rotating-text {
+                display: inline-block;
+                min-width: 120px;
+                text-align: left;
+                perspective: 1000px;
+            }
+            .word-flip {
+                animation: flipBoard 0.6s ease-in-out;
+                transform-style: preserve-3d;
+            }
+            @keyframes flipBoard {
+                0% {
+                    transform: rotateX(0deg);
+                    filter: blur(0px);
                     opacity: 1;
-                    transform: translateY(0);
                 }
-            }
-
-            .fade-in {
-                animation: fadeInUp 0.6s ease-out forwards;
-                opacity: 0;
-            }
-
-            .delay-100 { animation-delay: 0.1s; }
-            .delay-200 { animation-delay: 0.2s; }
-            .delay-300 { animation-delay: 0.3s; }
-
-            /* Scroll progress bar */
-            .progress-bar {
-                position: fixed;
-                top: 0;
-                left: 0;
-                height: 4px;
-                background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-                z-index: 9999;
-                transition: width 0.1s ease-out;
-            }
-
-            /* Mobile menu animation */
-            .mobile-menu {
-                transform: translateX(100%);
-                transition: transform 0.3s ease-in-out;
-            }
-
-            .mobile-menu.active {
-                transform: translateX(0);
-            }
-
-            /* Smooth hover glow */
-            .glow-on-hover {
-                position: relative;
-                overflow: hidden;
-            }
-
-            .glow-on-hover::before {
-                content: '';
-                position: absolute;
-                top: 50%;
-                left: 50%;
-                width: 0;
-                height: 0;
-                border-radius: 50%;
-                background: rgba(255, 255, 255, 0.1);
-                transform: translate(-50%, -50%);
-                transition: width 0.6s, height 0.6s;
-            }
-
-            .glow-on-hover:hover::before {
-                width: 300px;
-                height: 300px;
+                50% {
+                    transform: rotateX(90deg);
+                    filter: blur(4px);
+                    opacity: 0;
+                }
+                51% {
+                    transform: rotateX(-90deg);
+                    filter: blur(4px);
+                    opacity: 0;
+                }
+                100% {
+                    transform: rotateX(0deg);
+                    filter: blur(0px);
+                    opacity: 1;
+                }
             }
         </style>
+        <script>
+            if (localStorage.theme === "dark" || (!("theme" in localStorage) && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+                document.documentElement.classList.add("dark");
+            } else {
+                document.documentElement.classList.remove("dark");
+            }
+        </script>
     </head>
-    <body class="bg-gradient-to-br from-slate-50 to-blue-50">
-        <!-- Scroll Progress Bar -->
-        <div class="progress-bar" id="progressBar"></div>
-
+    <body class="bg-gradient-to-br from-slate-50 to-blue-50 dark:from-gray-900 dark:to-gray-800 text-gray-900 dark:text-gray-100 theme-transition">
         <!-- Navigation -->
-        <nav class="bg-white/90 backdrop-blur-lg shadow-lg sticky top-0 z-50 border-b border-blue-100">
+        <nav class="fixed w-full glass shadow-modern z-50 theme-transition">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="flex justify-between h-16 items-center">
-                    <a href="#" class="flex items-center gap-3 group">
-                        <div class="bg-gradient-to-br from-blue-500 to-purple-600 p-2 rounded-lg group-hover:scale-110 transition-transform duration-300">
+                    <a href="#" class="flex items-center gap-3 hover:opacity-80 transition-opacity duration-300">
+                        <div class="bg-gradient-to-br from-blue-500 to-purple-600 dark:from-blue-600 dark:to-purple-700 p-2 rounded-lg transition-transform duration-300 hover:scale-110">
                             <i class="fas fa-copy text-2xl text-white"></i>
                         </div>
                         <span class="text-2xl font-bold gradient-text">KubeMirror</span>
                     </a>
 
                     <!-- Desktop Menu -->
-                    <div class="hidden md:flex space-x-8">
-                        <a href="#problem" class="text-slate-700 hover:text-blue-600 font-medium transition-colors">Problem</a>
-                        <a href="#features" class="text-slate-700 hover:text-blue-600 font-medium transition-colors">Features</a>
-                        <a href="#examples" class="text-slate-700 hover:text-blue-600 font-medium transition-colors">Examples</a>
-                        <a href="#comparison" class="text-slate-700 hover:text-blue-600 font-medium transition-colors">Compare</a>
-                        <a href="#installation" class="text-slate-700 hover:text-blue-600 font-medium transition-colors">Install</a>
+                    <div class="hidden md:flex space-x-6">
+                        <a href="#problem" class="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 font-medium theme-transition">Problem</a>
+                        <a href="#features" class="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 font-medium theme-transition">Features</a>
+                        <a href="#examples" class="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 font-medium theme-transition">Examples</a>
+                        <a href="#comparison" class="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 font-transition">Compare</a>
+                        <a href="#installation" class="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 font-medium theme-transition">Install</a>
                     </div>
 
                     <div class="flex items-center space-x-4">
-                        <a href="https://github.com/lukaszraczylo/kubemirror" target="_blank" class="text-slate-700 hover:text-blue-600 transition-colors">
+                        <button id="theme-toggle" class="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 p-2 min-w-[44px] min-h-[44px] flex items-center justify-center theme-transition" aria-label="Toggle theme">
+                            <i class="fas fa-moon dark:hidden text-xl"></i>
+                            <i class="fas fa-sun hidden dark:inline text-xl"></i>
+                        </button>
+                        <a href="https://github.com/lukaszraczylo/kubemirror" target="_blank" class="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 p-2 min-w-[44px] min-h-[44px] flex items-center justify-center theme-transition" aria-label="View on GitHub">
                             <i class="fab fa-github text-2xl"></i>
                         </a>
                         <!-- Mobile Menu Button -->
-                        <button id="mobileMenuBtn" class="md:hidden text-slate-700 hover:text-blue-600">
+                        <button id="mobileMenuBtn" class="md:hidden text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 p-2 min-w-[44px] min-h-[44px] flex items-center justify-center">
                             <i class="fas fa-bars text-2xl"></i>
                         </button>
                     </div>
@@ -136,39 +151,39 @@
         </nav>
 
         <!-- Mobile Menu -->
-        <div id="mobileMenu" class="mobile-menu fixed top-16 right-0 w-64 h-full bg-white shadow-2xl z-40 md:hidden">
+        <div id="mobileMenu" class="mobile-menu fixed top-16 right-0 w-64 h-full bg-white dark:bg-gray-800 shadow-2xl z-40 md:hidden transform translate-x-full transition-transform duration-300 theme-transition">
             <div class="flex flex-col p-6 space-y-4">
-                <a href="#problem" class="text-slate-700 hover:text-blue-600 font-medium transition-colors py-2">Problem</a>
-                <a href="#features" class="text-slate-700 hover:text-blue-600 font-medium transition-colors py-2">Features</a>
-                <a href="#examples" class="text-slate-700 hover:text-blue-600 font-medium transition-colors py-2">Examples</a>
-                <a href="#comparison" class="text-slate-700 hover:text-blue-600 font-medium transition-colors py-2">Compare</a>
-                <a href="#installation" class="text-slate-700 hover:text-blue-600 font-medium transition-colors py-2">Install</a>
+                <a href="#problem" class="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 font-medium py-2 theme-transition">Problem</a>
+                <a href="#features" class="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 font-medium py-2 theme-transition">Features</a>
+                <a href="#examples" class="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 font-medium py-2 theme-transition">Examples</a>
+                <a href="#comparison" class="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 font-medium py-2 theme-transition">Compare</a>
+                <a href="#installation" class="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 font-medium py-2 theme-transition">Install</a>
             </div>
         </div>
 
         <!-- Hero Section -->
-        <section class="relative overflow-hidden py-24">
-            <div class="absolute inset-0 bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 opacity-70"></div>
+        <section class="relative overflow-hidden py-24 pt-32">
+            <div class="absolute inset-0 bg-gradient-to-br from-blue-50/50 via-purple-50/50 to-pink-50/50 dark:from-blue-900/20 dark:via-purple-900/20 dark:to-pink-900/20"></div>
             <div class="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-                <div class="mb-8 inline-block fade-in">
-                    <div class="bg-gradient-to-br from-blue-500 to-purple-600 p-6 rounded-2xl shadow-2xl">
+                <div class="mb-8 inline-block animate-fade-in-up">
+                    <div class="bg-gradient-to-br from-blue-500 to-purple-600 dark:from-blue-600 dark:to-purple-700 p-6 rounded-2xl shadow-2xl animate-float">
                         <i class="fas fa-copy text-7xl text-white"></i>
                     </div>
                 </div>
-                <h1 class="text-5xl md:text-6xl font-extrabold text-slate-900 mb-6 leading-tight fade-in delay-100">
-                    Copy Kubernetes Resources<br/>
+                <h1 class="text-3xl sm:text-2xl sm:text-xl sm:text-2xl lg:text-6xl font-bold text-gray-900 dark:text-white mb-4 sm:mb-6 leading-tight animate-fade-in-up theme-transition" style="animation-delay: 0.1s;">
+                    <span id="rotatingWord" class="rotating-text">Copy</span> Kubernetes Resources<br/>
                     <span class="gradient-text">Across Namespaces</span>
                 </h1>
-                <p class="text-xl md:text-2xl text-slate-600 mb-10 max-w-3xl mx-auto leading-relaxed fade-in delay-200">
+                <p class="text-base sm:text-base text-gray-600 dark:text-gray-300 mb-8 sm:mb-10 max-w-3xl mx-auto leading-relaxed animate-fade-in-up theme-transition" style="animation-delay: 0.2s;">
                     Share Secrets, ConfigMaps, and any Custom Resource (like Traefik Middleware, Cert-Manager Certificates) across multiple namespaces.
                     <strong>Automatically keep them in sync.</strong> Transform values per environment.
                 </p>
-                <div class="flex flex-col sm:flex-row justify-center gap-6 fade-in delay-300">
-                    <a href="#installation" class="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-10 py-4 rounded-xl font-bold text-lg hover:from-blue-700 hover:to-purple-700 transition-all shadow-lg hover:shadow-xl hover:scale-105 glow-on-hover">
+                <div class="flex flex-col sm:flex-row justify-center gap-6 animate-fade-in-up" style="animation-delay: 0.3s;">
+                    <a href="#installation" class="bg-gradient-to-r from-blue-600 to-purple-600 dark:from-blue-500 dark:to-purple-500 text-white px-10 py-4 rounded-xl font-bold text-lg hover:from-blue-700 hover:to-purple-700 dark:hover:from-blue-600 dark:hover:to-purple-600 transition-all shadow-lg hover:shadow-xl hover:scale-105">
                         <i class="fas fa-download mr-2"></i>
                         Get Started
                     </a>
-                    <a href="https://github.com/lukaszraczylo/kubemirror" target="_blank" class="bg-white text-slate-700 px-10 py-4 rounded-xl font-bold text-lg border-2 border-slate-300 hover:border-blue-500 hover:text-blue-600 transition-all shadow-lg hover:shadow-xl hover:scale-105">
+                    <a href="https://github.com/lukaszraczylo/kubemirror" target="_blank" class="bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 px-10 py-4 rounded-xl font-bold text-lg border-2 border-gray-300 dark:border-gray-600 hover:border-blue-500 dark:hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 transition-all shadow-lg hover:shadow-xl hover:scale-105 theme-transition">
                         <i class="fab fa-github mr-2"></i>
                         GitHub
                     </a>
@@ -177,55 +192,55 @@
         </section>
 
         <!-- The Problem Section -->
-        <section id="problem" class="py-24 bg-white">
+        <section id="problem" class="py-24 bg-white dark:bg-gray-900 theme-transition">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="text-center mb-16">
-                    <h2 class="text-4xl md:text-5xl font-extrabold text-slate-900 mb-6">The Problem</h2>
-                    <p class="text-xl md:text-2xl text-slate-600 max-w-4xl mx-auto">
+                <div class="text-center mb-12">
+                    <h2 class="text-2xl sm:text-xl sm:text-2xl font-bold text-gray-900 dark:text-white mb-3 sm:mb-4 theme-transition">The Problem</h2>
+                    <p class="text-base sm:text-lg text-gray-600 dark:text-gray-300 max-w-4xl mx-auto theme-transition">
                         Kubernetes doesn't let you share resources across namespaces. You need the same Secret or ConfigMap in 10 namespaces? You have to duplicate it manually and keep them all in sync.
                     </p>
                 </div>
 
                 <div class="grid md:grid-cols-3 gap-8 mb-16">
-                    <div class="bg-gradient-to-br from-red-50 to-red-100 border-l-4 border-red-500 p-8 rounded-lg shadow-lg hover-lift">
-                        <div class="flex items-center mb-4">
-                            <i class="fas fa-times-circle text-red-500 text-3xl mr-3"></i>
-                            <h3 class="font-bold text-xl text-slate-900">Manual Duplication</h3>
+                    <div class="bg-gradient-to-br from-red-50 to-red-100 dark:from-red-900/20 dark:to-red-800/20 border-l-4 border-red-500 dark:border-red-400 p-6 rounded-lg shadow-modern hover:transform hover:-translate-y-1 transition-all duration-300 theme-transition">
+                        <div class="flex items-center mb-3">
+                            <i class="fas fa-times-circle text-red-500 dark:text-red-400 text-2xl mr-3"></i>
+                            <h3 class="font-semibold text-lg text-gray-900 dark:text-white theme-transition">Manual Duplication</h3>
                         </div>
-                        <p class="text-slate-700 leading-relaxed">
+                        <p class="text-sm text-gray-700 dark:text-gray-300 leading-relaxed theme-transition">
                             Copy-paste the same TLS certificate Secret into 20 namespaces. Update it manually in all 20 when it expires.
                         </p>
                     </div>
 
-                    <div class="bg-gradient-to-br from-orange-50 to-orange-100 border-l-4 border-orange-500 p-8 rounded-lg shadow-lg hover-lift">
-                        <div class="flex items-center mb-4">
-                            <i class="fas fa-times-circle text-orange-500 text-3xl mr-3"></i>
-                            <h3 class="font-bold text-xl text-slate-900">Environment Hardcoding</h3>
+                    <div class="bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20 border-l-4 border-orange-500 dark:border-orange-400 p-6 rounded-lg shadow-modern hover:transform hover:-translate-y-1 transition-all duration-300 theme-transition">
+                        <div class="flex items-center mb-3">
+                            <i class="fas fa-times-circle text-orange-500 dark:text-orange-400 text-2xl mr-3"></i>
+                            <h3 class="font-semibold text-lg text-gray-900 dark:text-white theme-transition">Environment Hardcoding</h3>
                         </div>
-                        <p class="text-slate-700 leading-relaxed">
+                        <p class="text-sm text-gray-700 dark:text-gray-300 leading-relaxed theme-transition">
                             Same ConfigMap but with different API URLs for dev, staging, prod? Create 3 separate versions and maintain them.
                         </p>
                     </div>
 
-                    <div class="bg-gradient-to-br from-yellow-50 to-yellow-100 border-l-4 border-yellow-600 p-8 rounded-lg shadow-lg hover-lift">
-                        <div class="flex items-center mb-4">
-                            <i class="fas fa-times-circle text-yellow-600 text-3xl mr-3"></i>
-                            <h3 class="font-bold text-xl text-slate-900">Limited Tools</h3>
+                    <div class="bg-gradient-to-br from-yellow-50 to-yellow-100 dark:from-yellow-900/20 dark:to-yellow-800/20 border-l-4 border-yellow-600 dark:border-yellow-500 p-6 rounded-lg shadow-modern hover:transform hover:-translate-y-1 transition-all duration-300 theme-transition">
+                        <div class="flex items-center mb-3">
+                            <i class="fas fa-times-circle text-yellow-600 dark:text-yellow-500 text-2xl mr-3"></i>
+                            <h3 class="font-semibold text-lg text-gray-900 dark:text-white theme-transition">Limited Tools</h3>
                         </div>
-                        <p class="text-slate-700 leading-relaxed">
+                        <p class="text-sm text-gray-700 dark:text-gray-300 leading-relaxed theme-transition">
                             Existing tools only support Secrets/ConfigMaps. Want to share Traefik Middleware? Out of luck.
                         </p>
                     </div>
                 </div>
 
-                <div class="bg-gradient-to-br from-green-50 to-emerald-100 border-l-4 border-green-500 p-10 rounded-xl shadow-xl hover-lift">
+                <div class="bg-gradient-to-br from-green-50 to-emerald-100 dark:from-green-900/20 dark:to-emerald-900/20 border-l-4 border-green-500 dark:border-green-400 p-6 rounded-xl shadow-modern hover:transform hover:-translate-y-1 transition-all duration-300 theme-transition">
                     <div class="flex items-start gap-4">
-                        <i class="fas fa-check-circle text-green-500 text-4xl mt-1"></i>
+                        <i class="fas fa-check-circle text-green-500 dark:text-green-400 text-3xl mt-1"></i>
                         <div>
-                            <h3 class="font-bold text-2xl md:text-3xl text-slate-900 mb-4">KubeMirror's Solution</h3>
-                            <p class="text-slate-700 text-lg md:text-xl leading-relaxed">
-                                Define your resource once in a source namespace. KubeMirror automatically copies it to target namespaces (specific list, patterns like <code class="bg-white px-3 py-1 rounded font-mono text-purple-600 font-semibold">app-*</code>, or <code class="bg-white px-3 py-1 rounded font-mono text-purple-600 font-semibold">all</code>) and keeps them synchronized.
-                                Transform values per environment (e.g., <code class="bg-white px-3 py-1 rounded font-mono text-purple-600 font-semibold">preprod-*</code> namespaces get preprod API URLs, <code class="bg-white px-3 py-1 rounded font-mono text-purple-600 font-semibold">prod-*</code> get production URLs).
+                            <h3 class="font-bold text-xl text-gray-900 dark:text-white mb-3 theme-transition">KubeMirror's Solution</h3>
+                            <p class="text-gray-700 dark:text-gray-300 text-base leading-relaxed theme-transition">
+                                Define your resource once in a source namespace. KubeMirror automatically copies it to target namespaces (specific list, patterns like <code class="bg-white dark:bg-gray-800 px-2 py-1 rounded font-mono text-sm text-purple-600 dark:text-purple-400 font-semibold theme-transition">app-*</code>, or <code class="bg-white dark:bg-gray-800 px-2 py-1 rounded font-mono text-sm text-purple-600 dark:text-purple-400 font-semibold theme-transition">all</code>) and keeps them synchronized.
+                                Transform values per environment (e.g., <code class="bg-white dark:bg-gray-800 px-2 py-1 rounded font-mono text-sm text-purple-600 dark:text-purple-400 font-semibold theme-transition">preprod-*</code> namespaces get preprod API URLs, <code class="bg-white dark:bg-gray-800 px-2 py-1 rounded font-mono text-sm text-purple-600 dark:text-purple-400 font-semibold theme-transition">prod-*</code> get production URLs).
                                 Works with any Kubernetes resource type.
                             </p>
                         </div>
@@ -235,43 +250,43 @@
         </section>
 
         <!-- Features Section -->
-        <section id="features" class="py-24 bg-gradient-to-br from-slate-50 to-blue-50">
+        <section id="features" class="py-24 bg-gradient-to-br from-slate-50 to-blue-50 dark:from-gray-800 dark:to-gray-900 theme-transition">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="text-center mb-20">
-                    <h2 class="text-4xl md:text-5xl font-extrabold text-slate-900 mb-4">Key Features</h2>
-                    <p class="text-xl text-slate-600">Everything you need for resource mirroring and synchronization</p>
+                <div class="text-center mb-12">
+                    <h2 class="text-2xl sm:text-xl sm:text-2xl font-bold text-gray-900 dark:text-white mb-3 sm:mb-4 theme-transition">Key Features</h2>
+                    <p class="text-base sm:text-lg text-gray-600 dark:text-gray-300 theme-transition">Everything you need for resource mirroring and synchronization</p>
                 </div>
 
-                <div class="grid md:grid-cols-2 gap-10">
+                <div class="grid md:grid-cols-2 gap-6">
                     <!-- Any Resource Type -->
-                    <div class="bg-white p-8 md:p-10 rounded-2xl shadow-xl hover-lift border border-blue-100">
-                        <div class="bg-gradient-to-br from-blue-500 to-purple-600 w-16 h-16 rounded-xl flex items-center justify-center mb-6">
-                            <i class="fas fa-layer-group text-3xl text-white"></i>
+                    <div class="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-modern hover:transform hover:-translate-y-1 transition-all duration-300 border border-blue-100 dark:border-gray-700 theme-transition">
+                        <div class="bg-gradient-to-br from-blue-500 to-purple-600 w-12 h-12 rounded-xl flex items-center justify-center mb-4">
+                            <i class="fas fa-layer-group text-2xl text-white"></i>
                         </div>
-                        <h3 class="text-2xl md:text-3xl font-bold text-slate-900 mb-4">Mirror Any Resource Type</h3>
-                        <p class="text-slate-600 mb-6 text-lg">
+                        <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-3 theme-transition">Mirror Any Resource Type</h3>
+                        <p class="text-gray-600 dark:text-gray-300 mb-4 text-sm theme-transition">
                             Not just Secrets and ConfigMaps. Mirror any namespaced Kubernetes resource:
                         </p>
-                        <ul class="text-slate-700 space-y-3 text-lg">
-                            <li><i class="fas fa-check-circle text-green-500 mr-3"></i>Secrets & ConfigMaps (obviously)</li>
-                            <li><i class="fas fa-check-circle text-green-500 mr-3"></i>Traefik Middleware, IngressRoute</li>
-                            <li><i class="fas fa-check-circle text-green-500 mr-3"></i>Cert-Manager Certificates</li>
-                            <li><i class="fas fa-check-circle text-green-500 mr-3"></i>Any Custom Resource Definition (CRD)</li>
+                        <ul class="text-gray-700 dark:text-gray-300 space-y-2 text-sm theme-transition">
+                            <li><i class="fas fa-check-circle text-green-500 mr-2"></i>Secrets & ConfigMaps (obviously)</li>
+                            <li><i class="fas fa-check-circle text-green-500 mr-2"></i>Traefik Middleware, IngressRoute</li>
+                            <li><i class="fas fa-check-circle text-green-500 mr-2"></i>Cert-Manager Certificates</li>
+                            <li><i class="fas fa-check-circle text-green-500 mr-2"></i>Any Custom Resource Definition (CRD)</li>
                         </ul>
-                        <div class="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                            <p class="text-sm text-slate-600">
-                                <strong class="text-blue-700">How:</strong> KubeMirror discovers all available resource types automatically. No manual configuration needed.
+                        <div class="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 theme-transition">
+                            <p class="text-xs text-gray-600 dark:text-gray-300 theme-transition">
+                                <strong class="text-blue-700 dark:text-blue-400">How:</strong> KubeMirror discovers all available resource types automatically. No manual configuration needed.
                             </p>
                         </div>
                     </div>
 
                     <!-- Transformation Rules -->
-                    <div class="bg-white p-8 md:p-10 rounded-2xl shadow-xl hover-lift border border-purple-100">
-                        <div class="bg-gradient-to-br from-purple-500 to-pink-600 w-16 h-16 rounded-xl flex items-center justify-center mb-6">
-                            <i class="fas fa-magic text-3xl text-white"></i>
+                    <div class="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-modern hover:transform hover:-translate-y-1 transition-all duration-300 border border-purple-100 dark:border-gray-700 theme-transition">
+                        <div class="bg-gradient-to-br from-purple-500 to-pink-600 w-12 h-12 rounded-xl flex items-center justify-center mb-6">
+                            <i class="fas fa-magic text-2xl text-white"></i>
                         </div>
-                        <h3 class="text-2xl md:text-3xl font-bold text-slate-900 mb-4">Transform Per Environment</h3>
-                        <p class="text-slate-600 mb-6 text-lg">
+                        <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4 theme-transition">Transform Per Environment</h3>
+                        <p class="text-gray-600 dark:text-gray-300 mb-6 text-sm theme-transition">
                             Change values automatically based on target namespace:
                         </p>
                         <div class="code-block text-gray-100 p-5 rounded-xl font-mono text-xs md:text-sm overflow-x-auto mb-4 shadow-lg">
@@ -285,65 +300,65 @@
   <span class="text-yellow-400">value:</span> <span class="text-blue-400">"https://api.com"</span>
   <span class="text-yellow-400">namespacePattern:</span> <span class="text-blue-400">"prod-*"</span></pre>
                         </div>
-                        <div class="p-4 bg-purple-50 rounded-lg border border-purple-200">
-                            <p class="text-sm text-slate-600">
-                                <strong class="text-purple-700">Why:</strong> One source ConfigMap, different values per environment. No manual maintenance.
+                        <div class="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800 theme-transition">
+                            <p class="text-sm text-gray-600 dark:text-gray-300 theme-transition">
+                                <strong class="text-purple-700 dark:text-purple-400">Why:</strong> One source ConfigMap, different values per environment. No manual maintenance.
                             </p>
                         </div>
                     </div>
 
                     <!-- Automatic Sync -->
-                    <div class="bg-white p-8 md:p-10 rounded-2xl shadow-xl hover-lift border border-green-100">
-                        <div class="bg-gradient-to-br from-green-500 to-teal-600 w-16 h-16 rounded-xl flex items-center justify-center mb-6">
-                            <i class="fas fa-sync-alt text-3xl text-white"></i>
+                    <div class="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-modern hover:transform hover:-translate-y-1 transition-all duration-300 border border-green-100 dark:border-gray-700 theme-transition">
+                        <div class="bg-gradient-to-br from-green-500 to-teal-600 w-12 h-12 rounded-xl flex items-center justify-center mb-6">
+                            <i class="fas fa-sync-alt text-2xl text-white"></i>
                         </div>
-                        <h3 class="text-2xl md:text-3xl font-bold text-slate-900 mb-4">Automatic Synchronization</h3>
-                        <p class="text-slate-600 mb-6 text-lg">
+                        <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4 theme-transition">Automatic Synchronization</h3>
+                        <p class="text-gray-600 dark:text-gray-300 mb-6 text-sm theme-transition">
                             Update the source once. All copies update automatically:
                         </p>
-                        <ul class="text-slate-700 space-y-3 text-lg">
+                        <ul class="text-gray-700 dark:text-gray-300 space-y-3 text-sm theme-transition">
                             <li><i class="fas fa-arrow-right text-blue-500 mr-3"></i>Update source Secret → All 50 copies update</li>
                             <li><i class="fas fa-arrow-right text-blue-500 mr-3"></i>Delete source → All copies get deleted</li>
                             <li><i class="fas fa-arrow-right text-blue-500 mr-3"></i>Someone deletes a copy → Recreated automatically</li>
                             <li><i class="fas fa-arrow-right text-blue-500 mr-3"></i>New namespace created → Copy appears automatically</li>
                         </ul>
-                        <div class="mt-6 p-4 bg-green-50 rounded-lg border border-green-200">
-                            <p class="text-sm text-slate-600">
-                                <strong class="text-green-700">How:</strong> Uses SHA256 content hashing + Kubernetes generation tracking. Only updates when content actually changes.
+                        <div class="mt-6 p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800 theme-transition">
+                            <p class="text-sm text-gray-600 dark:text-gray-300 theme-transition">
+                                <strong class="text-green-700 dark:text-green-400">How:</strong> Uses SHA256 content hashing + Kubernetes generation tracking. Only updates when content actually changes.
                             </p>
                         </div>
                     </div>
 
                     <!-- Smart Targeting -->
-                    <div class="bg-white p-8 md:p-10 rounded-2xl shadow-xl hover-lift border border-orange-100">
-                        <div class="bg-gradient-to-br from-orange-500 to-red-600 w-16 h-16 rounded-xl flex items-center justify-center mb-6">
-                            <i class="fas fa-bullseye text-3xl text-white"></i>
+                    <div class="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-modern hover:transform hover:-translate-y-1 transition-all duration-300 border border-orange-100 dark:border-gray-700 theme-transition">
+                        <div class="bg-gradient-to-br from-orange-500 to-red-600 w-12 h-12 rounded-xl flex items-center justify-center mb-6">
+                            <i class="fas fa-bullseye text-2xl text-white"></i>
                         </div>
-                        <h3 class="text-2xl md:text-3xl font-bold text-slate-900 mb-4">Flexible Targeting</h3>
-                        <p class="text-slate-600 mb-6 text-lg">
+                        <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4 theme-transition">Flexible Targeting</h3>
+                        <p class="text-gray-600 dark:text-gray-300 mb-6 text-sm theme-transition">
                             Choose which namespaces receive the copy:
                         </p>
-                        <div class="space-y-4 text-slate-700 text-base md:text-lg">
+                        <div class="space-y-4 text-gray-700 dark:text-gray-300 text-base md:text-sm theme-transition">
                             <div class="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                                <code class="bg-slate-100 px-4 py-2 rounded-lg font-mono text-purple-700 font-semibold text-sm">namespace-1,namespace-2</code>
+                                <code class="bg-gray-100 dark:bg-gray-700 px-4 py-2 rounded-lg font-mono text-purple-700 dark:text-purple-400 font-semibold text-sm theme-transition">namespace-1,namespace-2</code>
                                 <span>Specific namespaces</span>
                             </div>
                             <div class="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                                <code class="bg-slate-100 px-4 py-2 rounded-lg font-mono text-purple-700 font-semibold text-sm">app-*,prod-*</code>
+                                <code class="bg-gray-100 dark:bg-gray-700 px-4 py-2 rounded-lg font-mono text-purple-700 dark:text-purple-400 font-semibold text-sm theme-transition">app-*,prod-*</code>
                                 <span>Pattern matching</span>
                             </div>
                             <div class="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                                <code class="bg-slate-100 px-4 py-2 rounded-lg font-mono text-purple-700 font-semibold text-sm">all</code>
+                                <code class="bg-gray-100 dark:bg-gray-700 px-4 py-2 rounded-lg font-mono text-purple-700 dark:text-purple-400 font-semibold text-sm theme-transition">all</code>
                                 <span>All namespaces (no labels required)</span>
                             </div>
                             <div class="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                                <code class="bg-slate-100 px-4 py-2 rounded-lg font-mono text-purple-700 font-semibold text-sm">all-labeled</code>
+                                <code class="bg-gray-100 dark:bg-gray-700 px-4 py-2 rounded-lg font-mono text-purple-700 dark:text-purple-400 font-semibold text-sm theme-transition">all-labeled</code>
                                 <span>Only namespaces with opt-in label</span>
                             </div>
                         </div>
-                        <div class="mt-6 p-4 bg-orange-50 rounded-lg border border-orange-200">
-                            <p class="text-sm text-slate-600">
-                                <strong class="text-orange-700">Safety:</strong> Source namespace never receives a copy. Max 100 targets per resource (configurable).
+                        <div class="mt-6 p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800 theme-transition">
+                            <p class="text-sm text-gray-600 dark:text-gray-300 theme-transition">
+                                <strong class="text-orange-700 dark:text-orange-400">Safety:</strong> Source namespace never receives a copy. Max 100 targets per resource (configurable).
                             </p>
                         </div>
                     </div>
@@ -352,26 +367,26 @@
         </section>
 
         <!-- Examples Section -->
-        <section id="examples" class="py-24 bg-white">
+        <section id="examples" class="py-24 bg-white dark:bg-gray-900 theme-transition">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="text-center mb-20">
-                    <h2 class="text-4xl md:text-5xl font-extrabold text-slate-900 mb-4">Real-World Examples</h2>
-                    <p class="text-xl text-slate-600">See how easy it is to get started with KubeMirror</p>
+                <div class="text-center mb-12">
+                    <h2 class="text-2xl sm:text-xl sm:text-2xl font-extrabold text-gray-900 dark:text-white mb-4 theme-transition">Real-World Examples</h2>
+                    <p class="text-xl text-gray-600 dark:text-gray-300 theme-transition">See how easy it is to get started with KubeMirror</p>
                 </div>
 
                 <div class="space-y-12">
                     <!-- Example 1: Basic Secret -->
-                    <div class="bg-gradient-to-br from-blue-50 to-indigo-50 p-8 md:p-10 rounded-2xl shadow-xl border border-blue-200 hover-lift">
+                    <div class="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 p-6 rounded-2xl shadow-modern border border-blue-200 dark:border-blue-800 hover:transform hover:-translate-y-1 transition-all duration-300 theme-transition">
                         <div class="flex flex-col sm:flex-row items-start gap-6 mb-6">
-                            <div class="bg-blue-600 w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0">
+                            <div class="bg-blue-600 dark:bg-blue-700 w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0">
                                 <span class="text-white font-bold text-2xl">1</span>
                             </div>
                             <div>
-                                <h3 class="text-2xl md:text-3xl font-bold text-slate-900 mb-3">
-                                    <i class="fas fa-lock text-blue-600 mr-3"></i>
+                                <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-3 theme-transition">
+                                    <i class="fas fa-lock text-blue-600 dark:text-blue-400 mr-3"></i>
                                     Basic: Mirror a TLS Secret
                                 </h3>
-                                <p class="text-slate-600 text-lg">Share your TLS certificate across multiple application namespaces</p>
+                                <p class="text-gray-600 dark:text-gray-300 text-sm theme-transition">Share your TLS certificate across multiple application namespaces</p>
                             </div>
                         </div>
                         <div class="code-block text-gray-100 p-4 md:p-6 rounded-xl font-mono text-xs md:text-sm overflow-x-auto shadow-lg">
@@ -393,17 +408,17 @@
                     </div>
 
                     <!-- Example 2: Pattern Matching -->
-                    <div class="bg-gradient-to-br from-purple-50 to-pink-50 p-8 md:p-10 rounded-2xl shadow-xl border border-purple-200 hover-lift">
+                    <div class="bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 p-6 rounded-2xl shadow-modern border border-purple-200 dark:border-purple-800 hover:transform hover:-translate-y-1 transition-all duration-300 theme-transition">
                         <div class="flex flex-col sm:flex-row items-start gap-6 mb-6">
-                            <div class="bg-purple-600 w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0">
+                            <div class="bg-purple-600 dark:bg-purple-700 w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0">
                                 <span class="text-white font-bold text-2xl">2</span>
                             </div>
                             <div>
-                                <h3 class="text-2xl md:text-3xl font-bold text-slate-900 mb-3">
-                                    <i class="fas fa-asterisk text-purple-600 mr-3"></i>
+                                <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-3 theme-transition">
+                                    <i class="fas fa-asterisk text-purple-600 dark:text-purple-400 mr-3"></i>
                                     Pattern Matching: Mirror to All App Namespaces
                                 </h3>
-                                <p class="text-slate-600 text-lg">Use wildcards to mirror to all namespaces matching a pattern</p>
+                                <p class="text-gray-600 dark:text-gray-300 text-sm theme-transition">Use wildcards to mirror to all namespaces matching a pattern</p>
                             </div>
                         </div>
                         <div class="code-block text-gray-100 p-4 md:p-6 rounded-xl font-mono text-xs md:text-sm overflow-x-auto shadow-lg">
@@ -422,26 +437,26 @@
   <span class="text-yellow-400">log_level:</span> <span class="text-purple-400">"info"</span>
   <span class="text-yellow-400">api_url:</span> <span class="text-purple-400">"https://api.example.com"</span></pre>
                         </div>
-                        <div class="mt-6 p-5 bg-purple-100 rounded-lg border border-purple-300">
-                            <p class="text-slate-700 text-base md:text-lg">
-                                <i class="fas fa-info-circle text-purple-600 mr-2"></i>
-                                <strong>Result:</strong> This ConfigMap will be automatically copied to <code class="bg-white px-2 py-1 rounded font-mono text-purple-700 text-sm">app-frontend</code>, <code class="bg-white px-2 py-1 rounded font-mono text-purple-700 text-sm">app-backend</code>, <code class="bg-white px-2 py-1 rounded font-mono text-purple-700 text-sm">app-worker</code>, and any other namespace starting with "app-"
+                        <div class="mt-6 p-5 bg-purple-100 dark:bg-purple-900/40 rounded-lg border border-purple-300 dark:border-purple-700 theme-transition">
+                            <p class="text-gray-700 dark:text-gray-300 text-base md:text-sm theme-transition">
+                                <i class="fas fa-info-circle text-purple-600 dark:text-purple-400 mr-2"></i>
+                                <strong>Result:</strong> This ConfigMap will be automatically copied to <code class="bg-white dark:bg-gray-800 px-2 py-1 rounded font-mono text-purple-700 dark:text-purple-400 text-sm theme-transition">app-frontend</code>, <code class="bg-white dark:bg-gray-800 px-2 py-1 rounded font-mono text-purple-700 dark:text-purple-400 text-sm theme-transition">app-backend</code>, <code class="bg-white dark:bg-gray-800 px-2 py-1 rounded font-mono text-purple-700 dark:text-purple-400 text-sm theme-transition">app-worker</code>, and any other namespace starting with "app-"
                             </p>
                         </div>
                     </div>
 
                     <!-- Example 3: Custom Resource (Traefik) -->
-                    <div class="bg-gradient-to-br from-green-50 to-teal-50 p-8 md:p-10 rounded-2xl shadow-xl border border-green-200 hover-lift">
+                    <div class="bg-gradient-to-br from-green-50 to-teal-50 dark:from-green-900/20 dark:to-teal-900/20 p-6 rounded-2xl shadow-modern border border-green-200 dark:border-green-800 hover:transform hover:-translate-y-1 transition-all duration-300 theme-transition">
                         <div class="flex flex-col sm:flex-row items-start gap-6 mb-6">
-                            <div class="bg-green-600 w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0">
+                            <div class="bg-green-600 dark:bg-green-700 w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0">
                                 <span class="text-white font-bold text-2xl">3</span>
                             </div>
                             <div>
-                                <h3 class="text-2xl md:text-3xl font-bold text-slate-900 mb-3">
-                                    <i class="fas fa-cubes text-green-600 mr-3"></i>
+                                <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-3 theme-transition">
+                                    <i class="fas fa-cubes text-green-600 dark:text-green-400 mr-3"></i>
                                     Custom Resource: Share Traefik Middleware
                                 </h3>
-                                <p class="text-slate-600 text-lg">Mirror any CRD like Traefik Middleware across your cluster</p>
+                                <p class="text-gray-600 dark:text-gray-300 text-sm theme-transition">Mirror any CRD like Traefik Middleware across your cluster</p>
                             </div>
                         </div>
                         <div class="code-block text-gray-100 p-4 md:p-6 rounded-xl font-mono text-xs md:text-sm overflow-x-auto shadow-lg">
@@ -461,9 +476,9 @@
     <span class="text-yellow-400">excludedContentTypes:</span>
       - text/event-stream</pre>
                         </div>
-                        <div class="mt-6 p-5 bg-green-100 rounded-lg border border-green-300">
-                            <p class="text-slate-700 text-base md:text-lg">
-                                <i class="fas fa-lightbulb text-green-600 mr-2"></i>
+                        <div class="mt-6 p-5 bg-green-100 dark:bg-green-900/40 rounded-lg border border-green-300 dark:border-green-700 theme-transition">
+                            <p class="text-gray-700 dark:text-gray-300 text-base md:text-sm theme-transition">
+                                <i class="fas fa-lightbulb text-green-600 dark:text-green-400 mr-2"></i>
                                 <strong>Works with any CRD:</strong> Cert-Manager Certificates, Gateway API resources, or your own custom resources!
                             </p>
                         </div>
@@ -473,89 +488,91 @@
         </section>
 
         <!-- Comparison Section -->
-        <section id="comparison" class="py-24 bg-gradient-to-br from-slate-50 to-blue-50">
+        <section id="comparison" class="py-24 bg-gradient-to-br from-slate-50 to-blue-50 dark:from-gray-800 dark:to-gray-900 theme-transition">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="text-center mb-16">
-                    <h2 class="text-4xl md:text-5xl font-extrabold text-slate-900 mb-6">How KubeMirror Compares</h2>
-                    <p class="text-xl md:text-2xl text-slate-600">We built KubeMirror to replace <a href="https://github.com/emberstack/kubernetes-reflector" class="text-blue-600 hover:underline font-semibold" target="_blank">emberstack/reflector</a></p>
+                    <h2 class="text-2xl sm:text-xl sm:text-2xl font-extrabold text-gray-900 dark:text-white mb-6 theme-transition">How KubeMirror Compares</h2>
+                    <p class="text-base sm:text-lg text-gray-600 dark:text-gray-300 theme-transition">We built KubeMirror to replace <a href="https://github.com/emberstack/kubernetes-reflector" class="text-blue-600 dark:text-blue-400 hover:underline font-semibold" target="_blank">emberstack/reflector</a></p>
                 </div>
 
-                <div class="overflow-x-auto rounded-2xl shadow-2xl">
-                    <table class="w-full bg-white">
-                        <thead class="bg-gradient-to-r from-slate-800 to-slate-900 text-white">
-                            <tr>
-                                <th class="px-6 md:px-8 py-6 text-left font-bold text-base md:text-lg">Capability</th>
-                                <th class="px-6 md:px-8 py-6 text-center font-bold text-base md:text-lg">KubeMirror</th>
-                                <th class="px-6 md:px-8 py-6 text-center font-bold text-base md:text-lg">Reflector</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-slate-200">
-                            <tr class="hover:bg-blue-50 transition-colors">
-                                <td class="px-6 md:px-8 py-6">
-                                    <div class="font-semibold text-base md:text-lg text-slate-900">Supported Resources</div>
-                                    <div class="text-sm text-slate-600 mt-1">What resource types can be mirrored</div>
-                                </td>
-                                <td class="px-6 md:px-8 py-6 text-center">
-                                    <div><i class="fas fa-check-circle text-green-500 text-2xl md:text-3xl"></i></div>
-                                    <div class="text-xs md:text-sm font-semibold text-green-700 mt-2">Secrets, ConfigMaps, CRDs, etc.</div>
-                                </td>
-                                <td class="px-6 md:px-8 py-6 text-center">
-                                    <div><i class="fas fa-minus-circle text-yellow-500 text-2xl md:text-3xl"></i></div>
-                                    <div class="text-xs md:text-sm font-semibold text-yellow-700 mt-2">Secrets, ConfigMaps only</div>
-                                </td>
-                            </tr>
-                            <tr class="hover:bg-blue-50 transition-colors bg-slate-50">
-                                <td class="px-6 md:px-8 py-6">
-                                    <div class="font-semibold text-base md:text-lg text-slate-900">Auto-Discovery</div>
-                                    <div class="text-sm text-slate-600 mt-1">Finds all resource types automatically</div>
-                                </td>
-                                <td class="px-6 md:px-8 py-6 text-center">
-                                    <div><i class="fas fa-check-circle text-green-500 text-2xl md:text-3xl"></i></div>
-                                    <div class="text-xs md:text-sm font-semibold text-green-700 mt-2">Yes</div>
-                                </td>
-                                <td class="px-6 md:px-8 py-6 text-center">
-                                    <div><i class="fas fa-times-circle text-red-500 text-2xl md:text-3xl"></i></div>
-                                    <div class="text-xs md:text-sm font-semibold text-red-700 mt-2">Hardcoded</div>
-                                </td>
-                            </tr>
-                            <tr class="hover:bg-blue-50 transition-colors">
-                                <td class="px-6 md:px-8 py-6">
-                                    <div class="font-semibold text-base md:text-lg text-slate-900">Value Transformation</div>
-                                    <div class="text-sm text-slate-600 mt-1">Change values per target namespace</div>
-                                </td>
-                                <td class="px-6 md:px-8 py-6 text-center">
-                                    <div><i class="fas fa-check-circle text-green-500 text-2xl md:text-3xl"></i></div>
-                                    <div class="text-xs md:text-sm font-semibold text-green-700 mt-2">Full support</div>
-                                </td>
-                                <td class="px-6 md:px-8 py-6 text-center">
-                                    <div><i class="fas fa-times-circle text-red-500 text-2xl md:text-3xl"></i></div>
-                                    <div class="text-xs md:text-sm font-semibold text-red-700 mt-2">Not available</div>
-                                </td>
-                            </tr>
-                            <tr class="hover:bg-blue-50 transition-colors bg-slate-50">
-                                <td class="px-6 md:px-8 py-6">
-                                    <div class="font-semibold text-base md:text-lg text-slate-900">Active Development</div>
-                                    <div class="text-sm text-slate-600 mt-1">Regular updates and bug fixes</div>
-                                </td>
-                                <td class="px-6 md:px-8 py-6 text-center">
-                                    <div><i class="fas fa-check-circle text-green-500 text-2xl md:text-3xl"></i></div>
-                                    <div class="text-xs md:text-sm font-semibold text-green-700 mt-2">Active</div>
-                                </td>
-                                <td class="px-6 md:px-8 py-6 text-center">
-                                    <div><i class="fas fa-check-circle text-green-500 text-2xl md:text-3xl"></i></div>
-                                    <div class="text-xs md:text-sm font-semibold text-green-700 mt-2">Recently resumed (2025)</div>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
+                <div class="glass rounded-xl overflow-hidden shadow-modern">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="bg-gradient-to-r from-blue-600 to-purple-600 text-white">
+                                <tr>
+                                    <th class="px-4 py-3 text-left font-semibold">Feature</th>
+                                    <th class="px-4 py-3 text-center font-semibold">KubeMirror</th>
+                                    <th class="px-4 py-3 text-center font-semibold">Reflector</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                                <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                    <td class="px-4 py-3">
+                                        <div class="font-medium text-gray-900 dark:text-white theme-transition">Supported Resources</div>
+                                        <div class="text-xs text-gray-600 dark:text-gray-400 mt-1 theme-transition">What resource types can be mirrored</div>
+                                    </td>
+                                    <td class="px-4 py-3 text-center">
+                                        <span class="text-green-500 text-xl">✓</span>
+                                        <div class="text-xs text-gray-600 dark:text-gray-400 mt-1 theme-transition">All CRDs</div>
+                                    </td>
+                                    <td class="px-4 py-3 text-center">
+                                        <span class="text-yellow-500 text-xl">⚠</span>
+                                        <div class="text-xs text-gray-600 dark:text-gray-400 mt-1 theme-transition">Secrets, ConfigMaps only</div>
+                                    </td>
+                                </tr>
+                                <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                    <td class="px-4 py-3">
+                                        <div class="font-medium text-gray-900 dark:text-white theme-transition">Auto-Discovery</div>
+                                        <div class="text-xs text-gray-600 dark:text-gray-400 mt-1 theme-transition">Finds all resource types automatically</div>
+                                    </td>
+                                    <td class="px-4 py-3 text-center">
+                                        <span class="text-green-500 text-xl">✓</span>
+                                        <div class="text-xs text-gray-600 dark:text-gray-400 mt-1 theme-transition">Yes</div>
+                                    </td>
+                                    <td class="px-4 py-3 text-center">
+                                        <span class="text-red-500 text-xl">✗</span>
+                                        <div class="text-xs text-gray-600 dark:text-gray-400 mt-1 theme-transition">Hardcoded</div>
+                                    </td>
+                                </tr>
+                                <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                    <td class="px-4 py-3">
+                                        <div class="font-medium text-gray-900 dark:text-white theme-transition">Value Transformation</div>
+                                        <div class="text-xs text-gray-600 dark:text-gray-400 mt-1 theme-transition">Change values per target namespace</div>
+                                    </td>
+                                    <td class="px-4 py-3 text-center">
+                                        <span class="text-green-500 text-xl">✓</span>
+                                        <div class="text-xs text-gray-600 dark:text-gray-400 mt-1 theme-transition">Full support</div>
+                                    </td>
+                                    <td class="px-4 py-3 text-center">
+                                        <span class="text-red-500 text-xl">✗</span>
+                                        <div class="text-xs text-gray-600 dark:text-gray-400 mt-1 theme-transition">Not available</div>
+                                    </td>
+                                </tr>
+                                <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                    <td class="px-4 py-3">
+                                        <div class="font-medium text-gray-900 dark:text-white theme-transition">Active Development</div>
+                                        <div class="text-xs text-gray-600 dark:text-gray-400 mt-1 theme-transition">Regular updates and bug fixes</div>
+                                    </td>
+                                    <td class="px-4 py-3 text-center">
+                                        <span class="text-green-500 text-xl">✓</span>
+                                        <div class="text-xs text-gray-600 dark:text-gray-400 mt-1 theme-transition">Active</div>
+                                    </td>
+                                    <td class="px-4 py-3 text-center">
+                                        <span class="text-green-500 text-xl">✓</span>
+                                        <div class="text-xs text-gray-600 dark:text-gray-400 mt-1 theme-transition">Recently resumed (2025)</div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
 
-                <div class="mt-16 bg-gradient-to-br from-blue-50 to-indigo-100 border-l-4 border-blue-600 p-8 rounded-xl shadow-xl">
+                <div class="mt-16 bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-blue-900/20 dark:to-indigo-900/20 border-l-4 border-blue-600 dark:border-blue-400 p-8 rounded-xl shadow-modern theme-transition">
                     <div class="flex flex-col sm:flex-row items-start gap-6">
-                        <i class="fas fa-info-circle text-blue-600 text-3xl md:text-4xl mt-1"></i>
+                        <i class="fas fa-info-circle text-blue-600 dark:text-blue-400 text-xl sm:text-2xl mt-1"></i>
                         <div>
-                            <h4 class="text-xl md:text-2xl font-bold text-slate-900 mb-4">Why We Built KubeMirror</h4>
-                            <p class="text-slate-700 text-base md:text-lg leading-relaxed">
+                            <h4 class="text-base sm:text-lg font-bold text-gray-900 dark:text-white mb-4 theme-transition">Why We Built KubeMirror</h4>
+                            <p class="text-gray-700 dark:text-gray-300 text-sm leading-relaxed theme-transition">
                                 We needed to share Traefik Middleware across 200+ namespaces with environment-specific configurations.
                                 Reflector couldn't do it (Secrets/ConfigMaps only, no transformations). So we built KubeMirror with modern
                                 Kubernetes best practices and all the features we wished Reflector had.
@@ -567,21 +584,21 @@
         </section>
 
         <!-- Installation Section -->
-        <section id="installation" class="py-24 bg-white">
+        <section id="installation" class="py-24 bg-white dark:bg-gray-900 theme-transition">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="text-center mb-20">
-                    <h2 class="text-4xl md:text-5xl font-extrabold text-slate-900 mb-4">Installation</h2>
-                    <p class="text-xl md:text-2xl text-slate-600">Get started in under 2 minutes</p>
+                <div class="text-center mb-12">
+                    <h2 class="text-2xl sm:text-xl sm:text-2xl font-extrabold text-gray-900 dark:text-white mb-4 theme-transition">Installation</h2>
+                    <p class="text-base sm:text-lg text-gray-600 dark:text-gray-300 theme-transition">Get started in under 2 minutes</p>
                 </div>
 
-                <div class="grid md:grid-cols-2 gap-10 mb-16">
+                <div class="grid md:grid-cols-2 gap-6 mb-16">
                     <!-- Helm Installation -->
-                    <div class="bg-gradient-to-br from-blue-50 to-indigo-50 p-8 md:p-10 rounded-2xl shadow-xl border border-blue-200 hover-lift">
+                    <div class="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 p-6 rounded-2xl shadow-modern border border-blue-200 dark:border-blue-800 hover:transform hover:-translate-y-1 transition-all duration-300 theme-transition">
                         <div class="flex items-center mb-6">
-                            <div class="bg-blue-600 w-14 h-14 rounded-xl flex items-center justify-center mr-4">
+                            <div class="bg-blue-600 dark:bg-blue-700 w-14 h-14 rounded-xl flex items-center justify-center mr-4">
                                 <i class="fas fa-ship text-2xl text-white"></i>
                             </div>
-                            <h3 class="text-2xl md:text-3xl font-bold text-slate-900">Helm <span class="text-blue-600">(Recommended)</span></h3>
+                            <h3 class="text-xl font-bold text-gray-900 dark:text-white theme-transition">Helm <span class="text-blue-600 dark:text-blue-400">(Recommended)</span></h3>
                         </div>
                         <div class="code-block text-gray-100 p-4 md:p-6 rounded-xl font-mono text-xs md:text-sm overflow-x-auto shadow-lg">
 <pre><span class="text-green-400">helm repo add kubemirror \</span>
@@ -595,12 +612,12 @@
                     </div>
 
                     <!-- kubectl Installation -->
-                    <div class="bg-gradient-to-br from-purple-50 to-pink-50 p-8 md:p-10 rounded-2xl shadow-xl border border-purple-200 hover-lift">
+                    <div class="bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 p-6 rounded-2xl shadow-modern border border-purple-200 dark:border-purple-800 hover:transform hover:-translate-y-1 transition-all duration-300 theme-transition">
                         <div class="flex items-center mb-6">
-                            <div class="bg-purple-600 w-14 h-14 rounded-xl flex items-center justify-center mr-4">
+                            <div class="bg-purple-600 dark:bg-purple-700 w-14 h-14 rounded-xl flex items-center justify-center mr-4">
                                 <i class="fas fa-terminal text-2xl text-white"></i>
                             </div>
-                            <h3 class="text-2xl md:text-3xl font-bold text-slate-900">kubectl</h3>
+                            <h3 class="text-xl font-bold text-gray-900 dark:text-white theme-transition">kubectl</h3>
                         </div>
                         <div class="code-block text-gray-100 p-4 md:p-6 rounded-xl font-mono text-xs md:text-sm overflow-x-auto shadow-lg">
 <pre><span class="text-green-400">kubectl apply -k \</span>
@@ -614,17 +631,17 @@
                 </div>
 
                 <!-- Quick Start Example -->
-                <div class="bg-gradient-to-br from-green-50 to-teal-50 p-8 md:p-12 rounded-2xl shadow-2xl border border-green-200">
-                    <h3 class="text-3xl md:text-4xl font-bold text-slate-900 mb-8 text-center">
-                        <i class="fas fa-rocket text-green-600 mr-3"></i>
+                <div class="bg-gradient-to-br from-green-50 to-teal-50 dark:from-green-900/20 dark:to-teal-900/20 p-6 md:p-8 rounded-2xl shadow-2xl border border-green-200 dark:border-green-800 theme-transition">
+                    <h3 class="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white mb-8 text-center theme-transition">
+                        <i class="fas fa-rocket text-green-600 dark:text-green-400 mr-3"></i>
                         Quick Start: Mirror a Secret in 30 Seconds
                     </h3>
 
-                    <div class="grid md:grid-cols-2 gap-10">
+                    <div class="grid md:grid-cols-2 gap-6">
                         <div>
                             <div class="flex items-center gap-3 mb-6">
-                                <div class="bg-green-600 w-10 h-10 rounded-full flex items-center justify-center text-white font-bold">1</div>
-                                <h4 class="font-bold text-xl md:text-2xl text-slate-900">Create your source Secret</h4>
+                                <div class="bg-green-600 dark:bg-green-700 w-10 h-10 rounded-full flex items-center justify-center text-white font-bold">1</div>
+                                <h4 class="font-bold text-base sm:text-lg text-gray-900 dark:text-white theme-transition">Create your source Secret</h4>
                             </div>
                             <div class="code-block text-gray-100 p-4 md:p-6 rounded-xl font-mono text-xs md:text-sm overflow-x-auto shadow-lg">
 <pre><span class="text-blue-400">apiVersion:</span> v1
@@ -646,16 +663,16 @@
 
                         <div>
                             <div class="flex items-center gap-3 mb-6">
-                                <div class="bg-green-600 w-10 h-10 rounded-full flex items-center justify-center text-white font-bold">2</div>
-                                <h4 class="font-bold text-xl md:text-2xl text-slate-900">That's it!</h4>
+                                <div class="bg-green-600 dark:bg-green-700 w-10 h-10 rounded-full flex items-center justify-center text-white font-bold">2</div>
+                                <h4 class="font-bold text-base sm:text-lg text-gray-900 dark:text-white theme-transition">That's it!</h4>
                             </div>
-                            <p class="text-slate-700 mb-6 text-base md:text-lg">
+                            <p class="text-gray-700 dark:text-gray-300 mb-6 text-base md:text-sm theme-transition">
                                 KubeMirror automatically:
                             </p>
-                            <ul class="text-slate-700 space-y-4 text-base md:text-lg">
+                            <ul class="text-gray-700 dark:text-gray-300 space-y-4 text-base md:text-sm theme-transition">
                                 <li class="flex items-start gap-3">
                                     <i class="fas fa-check-circle text-green-500 text-xl mt-1"></i>
-                                    <span>Creates copies in <code class="bg-white px-2 py-1 rounded font-mono text-green-700 text-sm">app-1</code> and <code class="bg-white px-2 py-1 rounded font-mono text-green-700 text-sm">app-2</code></span>
+                                    <span>Creates copies in <code class="bg-white dark:bg-gray-800 px-2 py-1 rounded font-mono text-green-700 dark:text-green-400 text-sm theme-transition">app-1</code> and <code class="bg-white dark:bg-gray-800 px-2 py-1 rounded font-mono text-green-700 dark:text-green-400 text-sm theme-transition">app-2</code></span>
                                 </li>
                                 <li class="flex items-start gap-3">
                                     <i class="fas fa-check-circle text-green-500 text-xl mt-1"></i>
@@ -670,10 +687,10 @@
                                     <span>Cleans up all copies when you delete the source</span>
                                 </li>
                             </ul>
-                            <div class="mt-8 p-5 bg-green-100 rounded-lg border border-green-300">
-                                <p class="text-sm text-slate-700">
-                                    <strong class="text-green-800">Required:</strong> Both the label <code class="bg-white px-2 py-1 rounded font-mono text-green-700 text-xs">kubemirror.raczylo.com/enabled</code>
-                                    and annotation <code class="bg-white px-2 py-1 rounded font-mono text-green-700 text-xs">kubemirror.raczylo.com/sync</code> are needed.
+                            <div class="mt-8 p-5 bg-green-100 dark:bg-green-900/40 rounded-lg border border-green-300 dark:border-green-700 theme-transition">
+                                <p class="text-sm text-gray-700 dark:text-gray-300 theme-transition">
+                                    <strong class="text-green-800 dark:text-green-400">Required:</strong> Both the label <code class="bg-white dark:bg-gray-800 px-2 py-1 rounded font-mono text-green-700 dark:text-green-400 text-xs theme-transition">kubemirror.raczylo.com/enabled</code>
+                                    and annotation <code class="bg-white dark:bg-gray-800 px-2 py-1 rounded font-mono text-green-700 dark:text-green-400 text-xs theme-transition">kubemirror.raczylo.com/sync</code> are needed.
                                 </p>
                             </div>
                         </div>
@@ -683,7 +700,7 @@
         </section>
 
         <!-- Footer -->
-        <footer class="bg-gradient-to-br from-slate-900 to-slate-800 text-gray-300 py-16">
+        <footer class="bg-gradient-to-br from-gray-900 to-gray-800 dark:from-black dark:to-gray-900 text-gray-300 dark:text-gray-400 py-16 theme-transition">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="grid md:grid-cols-3 gap-12">
                     <div>
@@ -693,12 +710,12 @@
                             </div>
                             <span class="text-2xl font-bold text-white">KubeMirror</span>
                         </div>
-                        <p class="text-gray-400 text-base md:text-lg leading-relaxed">
+                        <p class="text-gray-400 dark:text-gray-500 text-sm leading-relaxed theme-transition">
                             Copy Kubernetes resources across namespaces. Modern replacement for Reflector.
                         </p>
                     </div>
                     <div>
-                        <h4 class="text-lg md:text-xl font-bold text-white mb-6">Links</h4>
+                        <h4 class="text-base font-bold text-white mb-6">Links</h4>
                         <ul class="space-y-3 text-base md:text-lg">
                             <li><a href="https://github.com/lukaszraczylo/kubemirror" target="_blank" class="hover:text-white transition-colors"><i class="fab fa-github mr-2"></i>GitHub</a></li>
                             <li><a href="https://github.com/lukaszraczylo/kubemirror/issues" target="_blank" class="hover:text-white transition-colors"><i class="fas fa-bug mr-2"></i>Report Issue</a></li>
@@ -706,26 +723,25 @@
                         </ul>
                     </div>
                     <div>
-                        <h4 class="text-lg md:text-xl font-bold text-white mb-6">License</h4>
-                        <p class="text-gray-400 text-base md:text-lg">MIT License</p>
-                        <p class="text-gray-400 mt-4 text-base md:text-lg">© 2024 Lukasz Raczylo</p>
+                        <h4 class="text-lg font-bold text-white mb-6">License</h4>
+                        <p class="text-gray-400 dark:text-gray-500 text-sm theme-transition">MIT License</p>
+                        <p class="text-gray-400 dark:text-gray-500 mt-4 text-sm theme-transition">© 2025 Lukasz Raczylo</p>
                     </div>
                 </div>
             </div>
         </footer>
 
         <!-- Back to Top Button -->
-        <button id="backToTop" class="fixed bottom-8 right-8 bg-gradient-to-r from-blue-600 to-purple-600 text-white p-4 rounded-full shadow-2xl opacity-0 pointer-events-none transition-opacity duration-300 hover:scale-110 z-50">
+        <button id="backToTop" class="fixed bottom-8 right-8 bg-gradient-to-r from-blue-600 to-purple-600 dark:from-blue-500 dark:to-purple-500 text-white p-4 rounded-full shadow-2xl opacity-0 pointer-events-none transition-opacity duration-300 hover:scale-110 z-50">
             <i class="fas fa-arrow-up text-xl"></i>
         </button>
 
         <script>
-            // Scroll progress bar
-            window.addEventListener('scroll', () => {
-                const winScroll = document.body.scrollTop || document.documentElement.scrollTop;
-                const height = document.documentElement.scrollHeight - document.documentElement.clientHeight;
-                const scrolled = (winScroll / height) * 100;
-                document.getElementById('progressBar').style.width = scrolled + '%';
+            // Theme toggle
+            const themeToggle = document.getElementById('theme-toggle');
+            themeToggle.addEventListener('click', () => {
+                const isDark = document.documentElement.classList.toggle('dark');
+                localStorage.theme = isDark ? 'dark' : 'light';
             });
 
             // Mobile menu toggle
@@ -733,20 +749,20 @@
             const mobileMenu = document.getElementById('mobileMenu');
 
             mobileMenuBtn.addEventListener('click', () => {
-                mobileMenu.classList.toggle('active');
+                mobileMenu.classList.toggle('translate-x-full');
             });
 
             // Close mobile menu when clicking a link
             document.querySelectorAll('#mobileMenu a').forEach(link => {
                 link.addEventListener('click', () => {
-                    mobileMenu.classList.remove('active');
+                    mobileMenu.classList.add('translate-x-full');
                 });
             });
 
             // Close mobile menu when clicking outside
             document.addEventListener('click', (e) => {
                 if (!mobileMenu.contains(e.target) && !mobileMenuBtn.contains(e.target)) {
-                    mobileMenu.classList.remove('active');
+                    mobileMenu.classList.add('translate-x-full');
                 }
             });
 
@@ -777,6 +793,29 @@
                     }
                 });
             });
+
+            // Rotating word animation (flip board style)
+            const words = ['Copy', 'Mirror', 'Clone', 'Render'];
+            let currentWordIndex = 0;
+            const rotatingWordElement = document.getElementById('rotatingWord');
+
+            function rotateWord() {
+                rotatingWordElement.classList.remove('word-flip');
+
+                // Trigger reflow to restart animation
+                void rotatingWordElement.offsetWidth;
+
+                rotatingWordElement.classList.add('word-flip');
+
+                // Change word at the midpoint of the flip (when it's perpendicular)
+                setTimeout(() => {
+                    currentWordIndex = (currentWordIndex + 1) % words.length;
+                    rotatingWordElement.textContent = words[currentWordIndex];
+                }, 300); // Half of the 600ms animation duration
+            }
+
+            // Rotate word every 3 seconds
+            setInterval(rotateWord, 3000);
         </script>
     </body>
 </html>

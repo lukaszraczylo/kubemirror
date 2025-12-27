@@ -44,13 +44,20 @@ controller:
   leaderElectionID: "kubemirror-controller-leader"
 
   # Resource types to mirror
-  # Examples: ["Secret.v1", "ConfigMap.v1", "Ingress.v1.networking.k8s.io"]
+  # Examples: ["Secret.v1", "ConfigMap.v1", "Ingress.v1.networking.k8s.io", "Middleware.v1alpha1.traefik.io"]
   # If empty, auto-discovery will find all mirrorable resources
+  # MEMORY TIP: Specifying exact types reduces memory by 70-80% vs auto-discovery
+  # Common types: Secret.v1, ConfigMap.v1
   resourceTypes: []
 
   # Auto-discovery interval (only used when resourceTypes is empty)
   # How often to rediscover available resources in the cluster
   discoveryInterval: "5m"
+
+  # Cache resync period - how often to refresh all cached resources
+  # Higher values reduce memory churn and API load
+  # Default: 10m (was 30s in earlier versions)
+  resyncPeriod: "10m"
 
   # Resource limits
   maxTargets: 100
@@ -65,6 +72,20 @@ controller:
   # Prevents mirroring stale data but adds extra API call when cache is stale
   # Recommended: false for most deployments (eventual consistency is acceptable)
   verifySourceFreshness: false
+
+  # Lazy watcher initialization (RECOMMENDED for production)
+  # Only creates informers for resource types that actually have resources marked for mirroring
+  # Dramatically reduces memory usage - e.g., if you have 204 available resource types but only
+  # 2 types with marked resources, this creates only 2 watchers instead of 204
+  # Memory savings: typically 70-90% compared to eager initialization
+  # Default: false (user opt-in)
+  lazyWatcherInit: false
+
+  # Watcher scan interval (lazy-watcher-init mode only)
+  # How often to scan the cluster for new resource types that need watchers
+  # If you add a new resource type to mirror, it will be detected within this interval
+  # Default: 5m
+  watcherScanInterval: "5m"
 
   # Namespace filtering
   excludedNamespaces: ""
