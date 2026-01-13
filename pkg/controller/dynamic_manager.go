@@ -30,22 +30,18 @@ import (
 // 3. Dynamically registers controllers only for resource types in use
 // 4. Optionally unregisters controllers for resource types no longer in use
 type DynamicControllerManager struct {
-	client          client.Client
-	mgr             ctrl.Manager
-	config          *config.Config
-	filter          *filter.NamespaceFilter
-	namespaceLister NamespaceLister
-	scanInterval    time.Duration
-
-	// Tracking state
-	mu                     sync.RWMutex
-	registeredControllers  map[string]bool // GVK string -> registered
-	activeResourceTypes    map[string]schema.GroupVersionKind
-	availableResourceTypes []config.ResourceType
-
-	// Reconciler factories
+	client                  client.Client
+	mgr                     ctrl.Manager
+	namespaceLister         NamespaceLister
+	config                  *config.Config
+	filter                  *filter.NamespaceFilter
+	registeredControllers   map[string]bool
+	activeResourceTypes     map[string]schema.GroupVersionKind
 	sourceReconcilerFactory SourceReconcilerFactory
 	mirrorReconcilerFactory MirrorReconcilerFactory
+	availableResourceTypes  []config.ResourceType
+	scanInterval            time.Duration
+	mu                      sync.RWMutex
 }
 
 // SourceReconcilerFactory creates source reconcilers for a given GVK
@@ -58,13 +54,13 @@ type MirrorReconcilerFactory func(gvk schema.GroupVersionKind) *MirrorReconciler
 type DynamicManagerConfig struct {
 	Client                  client.Client
 	Manager                 ctrl.Manager
+	NamespaceLister         NamespaceLister
 	Config                  *config.Config
 	Filter                  *filter.NamespaceFilter
-	NamespaceLister         NamespaceLister
-	AvailableResources      []config.ResourceType
-	ScanInterval            time.Duration // How often to scan for new resources (default: 5m)
 	SourceReconcilerFactory SourceReconcilerFactory
 	MirrorReconcilerFactory MirrorReconcilerFactory
+	AvailableResources      []config.ResourceType
+	ScanInterval            time.Duration
 }
 
 // NewDynamicControllerManager creates a new dynamic controller manager

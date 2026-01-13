@@ -4,6 +4,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -30,12 +31,12 @@ import (
 // SourceReconciler reconciles source resources that need mirroring.
 type SourceReconciler struct {
 	client.Client
+	NamespaceLister NamespaceLister
+	APIReader       client.Reader
 	Scheme          *runtime.Scheme
 	Config          *config.Config
 	Filter          *filter.NamespaceFilter
-	NamespaceLister NamespaceLister
-	GVK             schema.GroupVersionKind // The resource type this reconciler handles
-	APIReader       client.Reader           // Direct API reader (bypasses cache)
+	GVK             schema.GroupVersionKind
 }
 
 // NamespaceLister provides a list of all namespaces in the cluster.
@@ -115,7 +116,13 @@ func (r *SourceReconciler) getSourceWithFreshness(ctx context.Context, key clien
 
 // Reconcile processes a single source resource.
 func (r *SourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx).WithValues("namespace", req.Namespace, "name", req.Name)
+	logger := log.FromContext(ctx).WithValues(
+		"namespace", req.Namespace,
+		"name", req.Name,
+		"kind", r.GVK.Kind,
+		"group", r.GVK.Group,
+		"version", r.GVK.Version,
+	)
 
 	// Fetch the source resource with optional freshness verification
 	source, err := r.getSourceWithFreshness(ctx, req.NamespacedName, r.GVK)
@@ -140,20 +147,22 @@ func (r *SourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	// Check if resource is being deleted
 	if !sourceObj.GetDeletionTimestamp().IsZero() {
 		// Resource is being deleted - clean up mirrors and remove finalizer
-		if containsString(sourceObj.GetFinalizers(), constants.FinalizerName) {
+		if slices.Contains(sourceObj.GetFinalizers(), constants.FinalizerName) {
 			logger.Info("source being deleted, cleaning up all mirrors")
-			if err := r.deleteAllMirrors(ctx, sourceObj); err != nil {
-				logger.Error(err, "failed to delete all mirrors during source deletion")
-				return ctrl.Result{}, err
+			deleteErr := r.deleteAllMirrors(ctx, sourceObj)
+			if deleteErr != nil {
+				logger.Error(deleteErr, "failed to delete all mirrors during source deletion")
+				return ctrl.Result{}, deleteErr
 			}
 
 			// Remove finalizer to allow resource deletion
 			logger.Info("removing finalizer from source resource")
 			finalizers := removeString(sourceObj.GetFinalizers(), constants.FinalizerName)
 			sourceObj.SetFinalizers(finalizers)
-			if err := r.Update(ctx, source); err != nil {
-				logger.Error(err, "failed to remove finalizer")
-				return ctrl.Result{}, err
+			updateErr := r.Update(ctx, source)
+			if updateErr != nil {
+				logger.Error(updateErr, "failed to remove finalizer")
+				return ctrl.Result{}, updateErr
 			}
 			logger.Info("finalizer removed, resource can now be deleted")
 		}
@@ -162,7 +171,7 @@ func (r *SourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	if !isEnabledForMirroring(sourceObj) {
 		// Resource is disabled - remove finalizer if present and delete all mirrors
-		if containsString(sourceObj.GetFinalizers(), constants.FinalizerName) {
+		if slices.Contains(sourceObj.GetFinalizers(), constants.FinalizerName) {
 			return r.handleDisabled(ctx, sourceObj)
 		}
 		// No finalizer, just skip
@@ -170,13 +179,14 @@ func (r *SourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	// Add finalizer if not present
-	if !containsString(sourceObj.GetFinalizers(), constants.FinalizerName) {
+	if !slices.Contains(sourceObj.GetFinalizers(), constants.FinalizerName) {
 		logger.Info("adding finalizer to source resource")
 		finalizers := append(sourceObj.GetFinalizers(), constants.FinalizerName)
 		sourceObj.SetFinalizers(finalizers)
-		if err := r.Update(ctx, source); err != nil {
-			logger.Error(err, "failed to add finalizer")
-			return ctrl.Result{}, err
+		addFinalizerErr := r.Update(ctx, source)
+		if addFinalizerErr != nil {
+			logger.Error(addFinalizerErr, "failed to add finalizer")
+			return ctrl.Result{}, addFinalizerErr
 		}
 		logger.Info("finalizer added")
 		// Requeue to continue with reconciliation after finalizer is added
@@ -200,8 +210,9 @@ func (r *SourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	// Reconcile each target namespace
 	var reconciledCount, errorCount int
 	for _, targetNs := range targetNamespaces {
-		if err := r.reconcileMirror(ctx, source, sourceObj, targetNs); err != nil {
-			logger.Error(err, "failed to reconcile mirror", "targetNamespace", targetNs)
+		reconcileErr := r.reconcileMirror(ctx, source, sourceObj, targetNs)
+		if reconcileErr != nil {
+			logger.Error(reconcileErr, "failed to reconcile mirror", "targetNamespace", targetNs)
 			errorCount++
 		} else {
 			reconciledCount++
@@ -247,7 +258,7 @@ func (r *SourceReconciler) handleDisabled(ctx context.Context, sourceObj metav1.
 	}
 
 	// Remove finalizer if present
-	if containsString(sourceObj.GetFinalizers(), constants.FinalizerName) {
+	if slices.Contains(sourceObj.GetFinalizers(), constants.FinalizerName) {
 		logger.Info("removing finalizer from disabled resource")
 		finalizers := removeString(sourceObj.GetFinalizers(), constants.FinalizerName)
 		sourceObj.SetFinalizers(finalizers)
@@ -301,9 +312,9 @@ func (r *SourceReconciler) reconcileMirror(ctx context.Context, source runtime.O
 		}
 
 		// Check if update is needed
-		needsSync, err := hash.NeedsSync(source, existing, existing.GetAnnotations())
-		if err != nil {
-			return fmt.Errorf("failed to check if sync needed: %w", err)
+		needsSync, syncCheckErr := hash.NeedsSync(source, existing, existing.GetAnnotations())
+		if syncCheckErr != nil {
+			return fmt.Errorf("failed to check if sync needed: %w", syncCheckErr)
 		}
 
 		if !needsSync {
@@ -312,12 +323,14 @@ func (r *SourceReconciler) reconcileMirror(ctx context.Context, source runtime.O
 		}
 
 		// Update mirror
-		if err := UpdateMirror(existing, source); err != nil {
-			return fmt.Errorf("failed to update mirror: %w", err)
+		updateErr := UpdateMirror(existing, source)
+		if updateErr != nil {
+			return fmt.Errorf("failed to update mirror: %w", updateErr)
 		}
 
-		if err := r.Update(ctx, existing); err != nil {
-			return fmt.Errorf("failed to update mirror in cluster: %w", err)
+		clusterUpdateErr := r.Update(ctx, existing)
+		if clusterUpdateErr != nil {
+			return fmt.Errorf("failed to update mirror in cluster: %w", clusterUpdateErr)
 		}
 
 		logger.V(1).Info("mirror updated")
@@ -472,6 +485,35 @@ func (r *SourceReconciler) resolveTargetNamespaces(ctx context.Context, sourceOb
 		return nil, nil
 	}
 
+	// Validate patterns and log warnings for invalid ones
+	validationResults, allValid := filter.ValidatePatterns(patterns)
+	if !allValid {
+		logger := log.FromContext(ctx)
+		invalidPatterns := filter.InvalidPatterns(validationResults)
+		for _, invalid := range invalidPatterns {
+			logger.Info("invalid glob pattern in target-namespaces annotation, pattern will be skipped",
+				"pattern", invalid.Pattern,
+				"error", invalid.Error.Error(),
+				"source", sourceObj.GetName(),
+				"namespace", sourceObj.GetNamespace(),
+			)
+		}
+
+		// Filter to only valid patterns
+		var validPatterns []string
+		for _, result := range validationResults {
+			if result.Valid {
+				validPatterns = append(validPatterns, result.Pattern)
+			}
+		}
+		patterns = validPatterns
+
+		// If no valid patterns remain, return empty
+		if len(patterns) == 0 {
+			return nil, nil
+		}
+	}
+
 	// Get all namespaces
 	allNamespaces, err := r.NamespaceLister.ListNamespaces(ctx)
 	if err != nil {
@@ -609,16 +651,6 @@ func (r *SourceReconciler) mapMirrorToSource(ctx context.Context, obj client.Obj
 			},
 		},
 	}
-}
-
-// containsString checks if a slice contains a string.
-func containsString(slice []string, s string) bool {
-	for _, item := range slice {
-		if item == s {
-			return true
-		}
-	}
-	return false
 }
 
 // removeString removes a string from a slice.

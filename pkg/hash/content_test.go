@@ -168,12 +168,12 @@ func TestComputeContentHash_ConfigMap(t *testing.T) {
 			name: "binaryData included in hash",
 			cm1: &corev1.ConfigMap{
 				BinaryData: map[string][]byte{
-					"file": []byte{0x00, 0x01, 0x02},
+					"file": {0x00, 0x01, 0x02},
 				},
 			},
 			cm2: &corev1.ConfigMap{
 				BinaryData: map[string][]byte{
-					"file": []byte{0x00, 0x01, 0xFF},
+					"file": {0x00, 0x01, 0xFF},
 				},
 			},
 			wantSame:  false,

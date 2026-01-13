@@ -592,3 +592,167 @@ func BenchmarkResolveTargetNamespaces_LargeScale(b *testing.B) {
 		}
 	})
 }
+
+// Tests for pattern validation
+
+func TestValidatePattern(t *testing.T) {
+	tests := []struct {
+		name    string
+		pattern string
+		wantErr bool
+	}{
+		{
+			name:    "valid simple pattern",
+			pattern: "app-*",
+			wantErr: false,
+		},
+		{
+			name:    "valid complex pattern",
+			pattern: "*-app-*-db",
+			wantErr: false,
+		},
+		{
+			name:    "valid exact match",
+			pattern: "my-namespace",
+			wantErr: false,
+		},
+		{
+			name:    "valid question mark pattern",
+			pattern: "app-?",
+			wantErr: false,
+		},
+		{
+			name:    "valid character class pattern",
+			pattern: "app-[abc]",
+			wantErr: false,
+		},
+		{
+			name:    "valid 'all' keyword",
+			pattern: constants.TargetNamespacesAll,
+			wantErr: false,
+		},
+		{
+			name:    "valid 'all-labeled' keyword",
+			pattern: constants.TargetNamespacesAllLabeled,
+			wantErr: false,
+		},
+		{
+			name:    "invalid unclosed bracket",
+			pattern: "app-[",
+			wantErr: true,
+		},
+		{
+			name:    "character range pattern is valid",
+			pattern: "app-[z-a]",
+			wantErr: false, // filepath.Match accepts character ranges
+		},
+		{
+			name:    "empty pattern is invalid",
+			pattern: "",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidatePattern(tt.pattern)
+			if tt.wantErr {
+				assert.Error(t, err, "expected error for pattern %q", tt.pattern)
+			} else {
+				assert.NoError(t, err, "unexpected error for pattern %q", tt.pattern)
+			}
+		})
+	}
+}
+
+func TestValidatePatterns(t *testing.T) {
+	tests := []struct {
+		name         string
+		patterns     []string
+		wantAllValid bool
+		wantInvalid  int
+	}{
+		{
+			name:         "all valid patterns",
+			patterns:     []string{"app-*", "prod-*", "staging-db"},
+			wantAllValid: true,
+			wantInvalid:  0,
+		},
+		{
+			name:         "empty patterns list",
+			patterns:     []string{},
+			wantAllValid: true,
+			wantInvalid:  0,
+		},
+		{
+			name:         "one invalid pattern",
+			patterns:     []string{"app-*", "invalid-[", "prod-*"},
+			wantAllValid: false,
+			wantInvalid:  1,
+		},
+		{
+			name:         "multiple invalid patterns",
+			patterns:     []string{"invalid-[", "app-*", "bad-["},
+			wantAllValid: false,
+			wantInvalid:  2,
+		},
+		{
+			name:         "all invalid patterns",
+			patterns:     []string{"bad-[", "worse-["},
+			wantAllValid: false,
+			wantInvalid:  2,
+		},
+		{
+			name:         "mixed with keywords",
+			patterns:     []string{constants.TargetNamespacesAll, "bad-[", "app-*"},
+			wantAllValid: false,
+			wantInvalid:  1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, allValid := ValidatePatterns(tt.patterns)
+			assert.Equal(t, tt.wantAllValid, allValid, "allValid mismatch")
+
+			invalidPatterns := InvalidPatterns(results)
+			assert.Equal(t, tt.wantInvalid, len(invalidPatterns), "invalid count mismatch")
+
+			// Verify all invalid patterns have errors
+			for _, invalid := range invalidPatterns {
+				assert.False(t, invalid.Valid)
+				assert.NotNil(t, invalid.Error)
+			}
+		})
+	}
+}
+
+func TestInvalidPatterns(t *testing.T) {
+	t.Run("filters only invalid patterns", func(t *testing.T) {
+		results := []PatternValidationResult{
+			{Pattern: "app-*", Valid: true, Error: nil},
+			{Pattern: "bad-[", Valid: false, Error: fmt.Errorf("invalid")},
+			{Pattern: "prod-*", Valid: true, Error: nil},
+			{Pattern: "worse-[", Valid: false, Error: fmt.Errorf("invalid")},
+		}
+
+		invalid := InvalidPatterns(results)
+		assert.Len(t, invalid, 2)
+		assert.Equal(t, "bad-[", invalid[0].Pattern)
+		assert.Equal(t, "worse-[", invalid[1].Pattern)
+	})
+
+	t.Run("returns nil for empty input", func(t *testing.T) {
+		invalid := InvalidPatterns(nil)
+		assert.Nil(t, invalid)
+	})
+
+	t.Run("returns nil for all valid patterns", func(t *testing.T) {
+		results := []PatternValidationResult{
+			{Pattern: "app-*", Valid: true, Error: nil},
+			{Pattern: "prod-*", Valid: true, Error: nil},
+		}
+		invalid := InvalidPatterns(results)
+		assert.Nil(t, invalid)
+	})
+}

@@ -15,13 +15,13 @@ import (
 
 func TestTransformer_Transform(t *testing.T) {
 	tests := []struct {
-		name     string
-		source   runtime.Object
 		ctx      TransformContext
+		source   runtime.Object
+		validate func(t *testing.T, result runtime.Object)
+		name     string
+		errMsg   string
 		options  TransformOptions
 		wantErr  bool
-		errMsg   string
-		validate func(t *testing.T, result runtime.Object)
 	}{
 		// Good cases - Value rules
 		{
@@ -566,12 +566,12 @@ func TestParsePath(t *testing.T) {
 
 func TestSetNestedField(t *testing.T) {
 	tests := []struct {
-		name    string
-		obj     map[string]interface{}
-		path    []string
 		value   interface{}
-		wantErr bool
+		obj     map[string]interface{}
 		want    map[string]interface{}
+		name    string
+		path    []string
+		wantErr bool
 	}{
 		{
 			name:    "set top-level field",

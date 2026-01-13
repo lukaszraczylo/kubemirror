@@ -49,8 +49,8 @@ func TestDynamicControllerManager_FindActiveResourceTypes(t *testing.T) {
 		name                string
 		availableResources  []config.ResourceType
 		existingResources   []*unstructured.Unstructured
-		expectedActiveCount int
 		expectedActiveTypes []string
+		expectedActiveCount int
 	}{
 		{
 			name: "no resources marked for mirroring",

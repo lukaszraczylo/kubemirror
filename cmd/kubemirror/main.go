@@ -3,10 +3,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
+	"net/http"
 	"os"
 	"time"
 
+	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -32,6 +35,24 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+}
+
+// makeCacheSyncChecker creates a healthz.Checker that verifies informer cache sync.
+// This ensures the readiness probe fails if caches are not synced.
+func makeCacheSyncChecker(c cache.Cache, ctx context.Context, logger logr.Logger) healthz.Checker {
+	return func(_ *http.Request) error {
+		// WaitForCacheSync returns true immediately if already synced,
+		// or waits until sync completes or context is cancelled.
+		// With a short context timeout, this provides a quick check.
+		checkCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancel()
+
+		if !c.WaitForCacheSync(checkCtx) {
+			logger.V(1).Info("informer caches not yet synced")
+			return errors.New("informer caches not synced")
+		}
+		return nil
+	}
 }
 
 func main() {
@@ -218,7 +239,8 @@ func main() {
 	// Set up resource discovery if auto-discovery is enabled
 	if resourceTypes == "" {
 		restConfig := ctrl.GetConfigOrDie()
-		discoveryClient, err := discovery.NewResourceDiscovery(restConfig)
+		var discoveryClient *discovery.ResourceDiscovery
+		discoveryClient, err = discovery.NewResourceDiscovery(restConfig)
 		if err != nil {
 			setupLog.Error(err, "unable to create discovery client")
 			os.Exit(1)
@@ -227,7 +249,8 @@ func main() {
 		discoveryMgr := discovery.NewManager(discoveryClient, discoveryInterval)
 
 		// Start discovery manager with signal-aware context
-		if err := discoveryMgr.Start(signalCtx); err != nil {
+		err = discoveryMgr.Start(signalCtx)
+		if err != nil {
 			setupLog.Error(err, "unable to start discovery manager")
 			os.Exit(1)
 		}
@@ -235,7 +258,8 @@ func main() {
 		// Wait for initial discovery with 30s timeout
 		waitCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := discoveryMgr.WaitForInitialDiscovery(waitCtx, 30*time.Second); err != nil {
+		err = discoveryMgr.WaitForInitialDiscovery(waitCtx, 30*time.Second)
+		if err != nil {
 			setupLog.Error(err, "timeout waiting for initial resource discovery")
 			os.Exit(1)
 		}
@@ -250,8 +274,21 @@ func main() {
 		)
 	}
 
-	// Create namespace lister
-	namespaceLister := controller.NewKubernetesNamespaceLister(mgr.GetClient())
+	// Create namespace lister with API reader for fresh namespace lookups.
+	// This ensures label-based queries (allow-mirrors label) return fresh data
+	// and don't suffer from informer cache staleness after label changes.
+	namespaceLister := controller.NewKubernetesNamespaceListerWithAPIReader(
+		mgr.GetClient(),
+		mgr.GetAPIReader(),
+	)
+
+	// Validate flag combinations and warn about conflicts
+	if lazyWatcherInit && resourceTypes != "" {
+		setupLog.Info("WARNING: --resource-types flag is ignored in lazy-watcher-init mode",
+			"specifiedTypes", resourceTypes,
+			"reason", "lazy watcher discovers resource types dynamically based on actual usage",
+		)
+	}
 
 	// Choose between lazy watcher initialization (scan for active resources) or eager (register all)
 	if lazyWatcherInit {
@@ -295,7 +332,8 @@ func main() {
 		})
 
 		// Start dynamic controller manager
-		if err := dynamicMgr.Start(signalCtx); err != nil {
+		err = dynamicMgr.Start(signalCtx)
+		if err != nil {
 			setupLog.Error(err, "unable to start dynamic controller manager")
 			os.Exit(1)
 		}
@@ -361,6 +399,7 @@ func main() {
 		Filter:          namespaceFilter,
 		NamespaceLister: namespaceLister,
 		ResourceTypes:   cfg.MirroredResourceTypes,
+		APIReader:       mgr.GetAPIReader(), // Direct API reader for fresh namespace lookups
 	}
 
 	if err = namespaceReconciler.SetupWithManager(mgr); err != nil {
@@ -371,11 +410,19 @@ func main() {
 	setupLog.Info("registered namespace reconciler")
 
 	// Add health checks
+	// Liveness: basic ping to verify the controller process is alive
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
 		os.Exit(1)
 	}
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+
+	// Readiness: check that informer caches are synced before accepting traffic.
+	// This prevents reconciliation from running with incomplete/stale cache data.
+	// The cache sync check ensures all informers have received initial data from the API server.
+	// Note: The manager automatically waits for cache sync before starting controllers,
+	// but this check ensures the readiness probe reflects cache state for external monitoring.
+	cacheReadyCheck := makeCacheSyncChecker(mgr.GetCache(), signalCtx, setupLog)
+	if err := mgr.AddReadyzCheck("readyz", cacheReadyCheck); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}

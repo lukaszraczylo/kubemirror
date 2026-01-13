@@ -282,9 +282,9 @@ func makeUnstructuredMirror(name, namespace, sourceNs, sourceName string) *unstr
 
 // Mock namespace lister for testing
 type mockNamespaceLister struct {
-	namespaces   []string
 	allowMirrors map[string]bool
 	optOut       map[string]bool
+	namespaces   []string
 }
 
 func (m *mockNamespaceLister) ListNamespaces(ctx context.Context) ([]string, error) {

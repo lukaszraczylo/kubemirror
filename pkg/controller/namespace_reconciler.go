@@ -4,6 +4,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	"slices"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -20,21 +22,31 @@ import (
 	"github.com/lukaszraczylo/kubemirror/pkg/filter"
 )
 
+const (
+	// cacheSettleDelay is the time to wait after namespace label changes
+	// to allow informer caches to sync. This addresses the race condition
+	// where namespace watch events fire before the cache is updated.
+	cacheSettleDelay = 3 * time.Second
+)
+
 // NamespaceReconciler watches for namespace CREATE and UPDATE events
 // and triggers reconciliation of source resources that match the new namespace.
 type NamespaceReconciler struct {
 	client.Client
+	NamespaceLister NamespaceLister
+	APIReader       client.Reader
 	Scheme          *runtime.Scheme
 	Config          *config.Config
 	Filter          *filter.NamespaceFilter
-	NamespaceLister NamespaceLister
-	// ResourceTypes contains all discovered resource types to reconcile
-	ResourceTypes []config.ResourceType
+	ResourceTypes   []config.ResourceType
 }
 
 // Reconcile processes namespace events and creates mirrors for matching sources.
 func (r *NamespaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx).WithValues("namespace", req.Name)
+	logger := log.FromContext(ctx).WithValues(
+		"namespace", req.Name,
+		"reconciler", "namespace",
+	)
 
 	// Fetch the namespace
 	namespace := &corev1.Namespace{}
@@ -76,7 +88,11 @@ func (r *NamespaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, fmt.Errorf("failed to reconcile %d source resources", totalErrors)
 	}
 
-	return ctrl.Result{}, nil
+	// Requeue with delay to catch any updates missed due to cache staleness.
+	// This is particularly important for namespace label changes where the
+	// informer cache may not yet reflect the new label state. The delay allows
+	// the cache to settle and ensures all relevant source resources are reconciled.
+	return ctrl.Result{RequeueAfter: cacheSettleDelay}, nil
 }
 
 // reconcileResourceType finds and reconciles all sources of a specific resource type
@@ -125,13 +141,7 @@ func (r *NamespaceReconciler) reconcileResourceType(ctx context.Context, rt conf
 		}
 
 		// Check if the new namespace matches this source's targets
-		var isTarget bool
-		for _, target := range targetNamespaces {
-			if target == namespaceName {
-				isTarget = true
-				break
-			}
-		}
+		isTarget := slices.Contains(targetNamespaces, namespaceName)
 
 		if isTarget {
 			// Create or update mirror in the namespace
@@ -222,6 +232,35 @@ func (r *NamespaceReconciler) resolveTargetNamespaces(ctx context.Context, sourc
 		return nil, nil
 	}
 
+	// Validate patterns and log warnings for invalid ones
+	validationResults, allValid := filter.ValidatePatterns(patterns)
+	if !allValid {
+		logger := log.FromContext(ctx)
+		invalidPatterns := filter.InvalidPatterns(validationResults)
+		for _, invalid := range invalidPatterns {
+			logger.Info("invalid glob pattern in target-namespaces annotation, pattern will be skipped",
+				"pattern", invalid.Pattern,
+				"error", invalid.Error.Error(),
+				"source", source.GetName(),
+				"namespace", source.GetNamespace(),
+			)
+		}
+
+		// Filter to only valid patterns
+		var validPatterns []string
+		for _, result := range validationResults {
+			if result.Valid {
+				validPatterns = append(validPatterns, result.Pattern)
+			}
+		}
+		patterns = validPatterns
+
+		// If no valid patterns remain, return empty
+		if len(patterns) == 0 {
+			return nil, nil
+		}
+	}
+
 	// Get all namespaces
 	allNamespaces, err := r.NamespaceLister.ListNamespaces(ctx)
 	if err != nil {
@@ -292,8 +331,18 @@ func (r *NamespaceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			}
 
 			// Check if allow-mirrors label changed
-			oldLabel := oldNs.Labels[constants.LabelAllowMirrors]
-			newLabel := newNs.Labels[constants.LabelAllowMirrors]
+			// Use GetLabels() to safely handle nil labels map
+			oldLabels := oldNs.GetLabels()
+			newLabels := newNs.GetLabels()
+
+			// Get label values with nil-safe access
+			var oldLabel, newLabel string
+			if oldLabels != nil {
+				oldLabel = oldLabels[constants.LabelAllowMirrors]
+			}
+			if newLabels != nil {
+				newLabel = newLabels[constants.LabelAllowMirrors]
+			}
 
 			return oldLabel != newLabel
 		},

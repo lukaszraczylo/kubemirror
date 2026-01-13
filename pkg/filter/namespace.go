@@ -2,11 +2,78 @@
 package filter
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
 	"github.com/lukaszraczylo/kubemirror/pkg/constants"
 )
+
+// PatternValidationResult contains the result of validating a pattern.
+type PatternValidationResult struct {
+	Error   error
+	Pattern string
+	Valid   bool
+}
+
+// ValidatePattern checks if a glob pattern is syntactically valid.
+// Returns an error if the pattern cannot be compiled by filepath.Match.
+func ValidatePattern(pattern string) error {
+	// Empty pattern is invalid
+	if pattern == "" {
+		return fmt.Errorf("empty pattern")
+	}
+
+	// Special keywords are always valid
+	if pattern == constants.TargetNamespacesAll || pattern == constants.TargetNamespacesAllLabeled {
+		return nil
+	}
+
+	// Use filepath.Match with a test string to validate pattern syntax
+	// We use "test" as a dummy value - we only care about the error
+	_, err := filepath.Match(pattern, "test")
+	if err != nil {
+		return fmt.Errorf("invalid glob pattern %q: %w", pattern, err)
+	}
+
+	return nil
+}
+
+// ValidatePatterns validates a list of patterns and returns results for each.
+// Returns a slice of validation results and a boolean indicating if all patterns are valid.
+func ValidatePatterns(patterns []string) ([]PatternValidationResult, bool) {
+	if len(patterns) == 0 {
+		return nil, true
+	}
+
+	results := make([]PatternValidationResult, len(patterns))
+	allValid := true
+
+	for i, pattern := range patterns {
+		err := ValidatePattern(pattern)
+		results[i] = PatternValidationResult{
+			Pattern: pattern,
+			Valid:   err == nil,
+			Error:   err,
+		}
+		if err != nil {
+			allValid = false
+		}
+	}
+
+	return results, allValid
+}
+
+// InvalidPatterns returns only the invalid patterns from a validation result.
+func InvalidPatterns(results []PatternValidationResult) []PatternValidationResult {
+	var invalid []PatternValidationResult
+	for _, r := range results {
+		if !r.Valid {
+			invalid = append(invalid, r)
+		}
+	}
+	return invalid
+}
 
 // NamespaceFilter handles namespace filtering logic including patterns and exclusions.
 type NamespaceFilter struct {
