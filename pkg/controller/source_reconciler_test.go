@@ -134,6 +134,14 @@ func (m *MockNamespaceLister) ListOptOutNamespaces(ctx context.Context) ([]strin
 	return args.Get(0).([]string), args.Error(1)
 }
 
+func (m *MockNamespaceLister) ListNamespacesWithLabels(ctx context.Context) (*NamespaceInfo, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*NamespaceInfo), args.Error(1)
+}
+
 func TestIsEnabledForMirroring(t *testing.T) {
 	tests := []struct {
 		obj  metav1.Object
@@ -280,9 +288,12 @@ func TestSourceReconciler_resolveTargetNamespaces(t *testing.T) {
 			mockLister := new(MockNamespaceLister)
 
 			if tt.expectListCalls {
-				mockLister.On("ListNamespaces", mock.Anything).Return(tt.allNamespaces, nil)
-				mockLister.On("ListAllowMirrorsNamespaces", mock.Anything).Return(tt.allowMirrorsNamespaces, nil)
-				mockLister.On("ListOptOutNamespaces", mock.Anything).Return([]string{}, nil)
+				nsInfo := &NamespaceInfo{
+					All:          tt.allNamespaces,
+					AllowMirrors: tt.allowMirrorsNamespaces,
+					OptOut:       []string{},
+				}
+				mockLister.On("ListNamespacesWithLabels", mock.Anything).Return(nsInfo, nil)
 			}
 
 			r := &SourceReconciler{
@@ -442,12 +453,15 @@ func BenchmarkIsEnabledForMirroring(b *testing.B) {
 func BenchmarkResolveTargetNamespaces(b *testing.B) {
 	mockLister := new(MockNamespaceLister)
 	allNamespaces := make([]string, 100)
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		allNamespaces[i] = fmt.Sprintf("namespace-%d", i)
 	}
-	mockLister.On("ListNamespaces", mock.Anything).Return(allNamespaces, nil)
-	mockLister.On("ListAllowMirrorsNamespaces", mock.Anything).Return(allNamespaces[:50], nil)
-	mockLister.On("ListOptOutNamespaces", mock.Anything).Return([]string{}, nil)
+	nsInfo := &NamespaceInfo{
+		All:          allNamespaces,
+		AllowMirrors: allNamespaces[:50],
+		OptOut:       []string{},
+	}
+	mockLister.On("ListNamespacesWithLabels", mock.Anything).Return(nsInfo, nil)
 
 	r := &SourceReconciler{
 		Config:          &config.Config{},
@@ -517,7 +531,12 @@ func TestSourceReconciler_cleanupOrphanedMirrors(t *testing.T) {
 
 	// Setup: all namespaces in cluster
 	allNamespaces := []string{"default", "app-1", "app-2", "app-3", "prod-1"}
-	mockLister.On("ListNamespaces", mock.Anything).Return(allNamespaces, nil)
+	nsInfo := &NamespaceInfo{
+		All:          allNamespaces,
+		AllowMirrors: []string{},
+		OptOut:       []string{},
+	}
+	mockLister.On("ListNamespacesWithLabels", mock.Anything).Return(nsInfo, nil)
 
 	// Current target list (after annotation change): only app-1 and app-2
 	targetNamespaces := []string{"app-1", "app-2"}
@@ -624,13 +643,34 @@ func TestSourceReconciler_Reconcile_AnnotationChange_AllToAllLabeled(t *testing.
 	mockLister := new(MockNamespaceLister)
 	mockFilter := filter.NewNamespaceFilter(nil, nil)
 
-	mockLister.On("ListNamespaces", mock.Anything).Return(allNamespaces, nil)
-	mockLister.On("ListAllowMirrorsNamespaces", mock.Anything).Return(allowMirrorsNamespaces, nil)
-	mockLister.On("ListOptOutNamespaces", mock.Anything).Return([]string{}, nil)
+	nsInfo := &NamespaceInfo{
+		All:          allNamespaces,
+		AllowMirrors: allowMirrorsNamespaces,
+		OptOut:       []string{},
+	}
+	mockLister.On("ListNamespacesWithLabels", mock.Anything).Return(nsInfo, nil)
 
 	// Mock Get for source
 	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "default", Name: "test-secret"}, mock.Anything).
 		Return(nil, source)
+
+	// Helper to create a mock mirror for verification
+	createMirror := func(ns string) *unstructured.Unstructured {
+		return &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Secret",
+				"metadata": map[string]any{
+					"name":      "test-secret",
+					"namespace": ns,
+					"labels": map[string]any{
+						constants.LabelManagedBy: constants.ControllerName,
+						constants.LabelMirror:    "true",
+					},
+				},
+			},
+		}
+	}
 
 	// Mock reconcileMirror calls for app-1 and app-2 (current targets)
 	notFoundErr := errors.NewNotFound(schema.GroupResource{Group: "", Resource: "secrets"}, "test-secret")
@@ -639,12 +679,18 @@ func TestSourceReconciler_Reconcile_AnnotationChange_AllToAllLabeled(t *testing.
 	mockClient.On("Create", mock.Anything, mock.MatchedBy(func(obj client.Object) bool {
 		return obj.GetNamespace() == "app-1"
 	}), mock.Anything).Return(nil).Once()
+	// Verification Get after Create
+	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "app-1", Name: "test-secret"}, mock.Anything).
+		Return(nil, createMirror("app-1")).Once()
 
 	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "app-2", Name: "test-secret"}, mock.Anything).
 		Return(notFoundErr, nil).Once()
 	mockClient.On("Create", mock.Anything, mock.MatchedBy(func(obj client.Object) bool {
 		return obj.GetNamespace() == "app-2"
 	}), mock.Anything).Return(nil).Once()
+	// Verification Get after Create
+	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "app-2", Name: "test-secret"}, mock.Anything).
+		Return(nil, createMirror("app-2")).Once()
 
 	// Mock cleanup: check orphaned namespaces app-3, prod-1, prod-2
 	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "app-3", Name: "test-secret"}, mock.Anything).
@@ -751,9 +797,12 @@ func TestSourceReconciler_Reconcile_AnnotationChange_PatternChange(t *testing.T)
 	mockLister := new(MockNamespaceLister)
 	mockFilter := filter.NewNamespaceFilter(nil, nil)
 
-	mockLister.On("ListNamespaces", mock.Anything).Return(allNamespaces, nil)
-	mockLister.On("ListAllowMirrorsNamespaces", mock.Anything).Return([]string{}, nil)
-	mockLister.On("ListOptOutNamespaces", mock.Anything).Return([]string{}, nil)
+	nsInfo := &NamespaceInfo{
+		All:          allNamespaces,
+		AllowMirrors: []string{},
+		OptOut:       []string{},
+	}
+	mockLister.On("ListNamespacesWithLabels", mock.Anything).Return(nsInfo, nil)
 
 	// Mock Get for source
 	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "default", Name: "app-config"}, mock.Anything).
@@ -761,18 +810,42 @@ func TestSourceReconciler_Reconcile_AnnotationChange_PatternChange(t *testing.T)
 
 	notFoundErr := errors.NewNotFound(schema.GroupResource{Group: "", Resource: "configmaps"}, "app-config")
 
+	// Helper to create a mock mirror for verification
+	createMirror := func(ns string) *unstructured.Unstructured {
+		return &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata": map[string]any{
+					"name":      "app-config",
+					"namespace": ns,
+					"labels": map[string]any{
+						constants.LabelManagedBy: constants.ControllerName,
+						constants.LabelMirror:    "true",
+					},
+				},
+			},
+		}
+	}
+
 	// Mock reconcileMirror for prod-1 and prod-2 (new targets)
 	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "prod-1", Name: "app-config"}, mock.Anything).
 		Return(notFoundErr, nil).Once()
 	mockClient.On("Create", mock.Anything, mock.MatchedBy(func(obj client.Object) bool {
 		return obj.GetNamespace() == "prod-1"
 	}), mock.Anything).Return(nil).Once()
+	// Verification Get after Create
+	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "prod-1", Name: "app-config"}, mock.Anything).
+		Return(nil, createMirror("prod-1")).Once()
 
 	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "prod-2", Name: "app-config"}, mock.Anything).
 		Return(notFoundErr, nil).Once()
 	mockClient.On("Create", mock.Anything, mock.MatchedBy(func(obj client.Object) bool {
 		return obj.GetNamespace() == "prod-2"
 	}), mock.Anything).Return(nil).Once()
+	// Verification Get after Create
+	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "prod-2", Name: "app-config"}, mock.Anything).
+		Return(nil, createMirror("prod-2")).Once()
 
 	// Mock cleanup: delete orphaned mirrors in app-1, app-2, app-3
 	for _, ns := range []string{"app-1", "app-2", "app-3"} {

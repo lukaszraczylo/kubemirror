@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -22,6 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/lukaszraczylo/kubemirror/pkg/circuitbreaker"
 	"github.com/lukaszraczylo/kubemirror/pkg/config"
 	"github.com/lukaszraczylo/kubemirror/pkg/constants"
 	"github.com/lukaszraczylo/kubemirror/pkg/filter"
@@ -36,6 +38,7 @@ type SourceReconciler struct {
 	Scheme          *runtime.Scheme
 	Config          *config.Config
 	Filter          *filter.NamespaceFilter
+	CircuitBreaker  *circuitbreaker.CircuitBreaker
 	GVK             schema.GroupVersionKind
 }
 
@@ -45,6 +48,8 @@ type NamespaceLister interface {
 	ListNamespaces(ctx context.Context) ([]string, error)
 	ListAllowMirrorsNamespaces(ctx context.Context) ([]string, error)
 	ListOptOutNamespaces(ctx context.Context) ([]string, error)
+	// ListNamespacesWithLabels returns all namespace info in a single API call (preferred)
+	ListNamespacesWithLabels(ctx context.Context) (*NamespaceInfo, error)
 }
 
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
@@ -143,6 +148,20 @@ func (r *SourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, nil
 	}
 
+	// Check circuit breaker - skip if circuit is open (too many failures)
+	if r.CircuitBreaker != nil {
+		if !r.CircuitBreaker.AllowRequest(req.Namespace, req.Name, r.GVK.Kind) {
+			cbState := r.CircuitBreaker.GetState(req.Namespace, req.Name, r.GVK.Kind)
+			failCount := r.CircuitBreaker.GetFailureCount(req.Namespace, req.Name, r.GVK.Kind)
+			logger.Info("circuit breaker open, skipping reconciliation",
+				"state", cbState.String(),
+				"consecutiveFailures", failCount,
+				"lastError", r.CircuitBreaker.GetLastError(req.Namespace, req.Name, r.GVK.Kind))
+			// Requeue after circuit breaker reset timeout to try again
+			return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+		}
+	}
+
 	// Check if resource is enabled for mirroring
 	// Check if resource is being deleted
 	if !sourceObj.GetDeletionTimestamp().IsZero() {
@@ -197,6 +216,9 @@ func (r *SourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	targetNamespaces, err := r.resolveTargetNamespaces(ctx, sourceObj)
 	if err != nil {
 		logger.Error(err, "failed to resolve target namespaces")
+		if r.CircuitBreaker != nil {
+			r.CircuitBreaker.RecordFailure(req.Namespace, req.Name, r.GVK.Kind, err)
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -231,6 +253,9 @@ func (r *SourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	// Update status annotation with last sync info
 	if err := r.updateLastSyncStatus(ctx, source, sourceObj, reconciledCount, errorCount); err != nil {
 		logger.Error(err, "failed to update sync status")
+		if r.CircuitBreaker != nil {
+			r.CircuitBreaker.RecordFailure(req.Namespace, req.Name, r.GVK.Kind, err)
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -241,7 +266,22 @@ func (r *SourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	// Return error if there were errors (controller-runtime will automatically requeue with exponential backoff)
 	if errorCount > 0 {
-		return ctrl.Result{}, fmt.Errorf("failed to reconcile %d/%d mirrors", errorCount, len(targetNamespaces))
+		err := fmt.Errorf("failed to reconcile %d/%d mirrors", errorCount, len(targetNamespaces))
+		// Record failure with circuit breaker
+		if r.CircuitBreaker != nil {
+			state, justOpened := r.CircuitBreaker.RecordFailure(req.Namespace, req.Name, r.GVK.Kind, err)
+			if justOpened {
+				logger.Info("circuit breaker opened due to repeated failures",
+					"state", state.String(),
+					"consecutiveFailures", r.CircuitBreaker.GetFailureCount(req.Namespace, req.Name, r.GVK.Kind))
+			}
+		}
+		return ctrl.Result{}, err
+	}
+
+	// Record success with circuit breaker
+	if r.CircuitBreaker != nil {
+		r.CircuitBreaker.RecordSuccess(req.Namespace, req.Name, r.GVK.Kind)
 	}
 
 	return ctrl.Result{}, nil
@@ -343,11 +383,21 @@ func (r *SourceReconciler) reconcileMirror(ctx context.Context, source runtime.O
 		return fmt.Errorf("failed to create mirror: %w", err)
 	}
 
-	if err := r.Create(ctx, mirror.(client.Object)); err != nil {
+	mirrorObj := mirror.(client.Object)
+	if err := r.Create(ctx, mirrorObj); err != nil {
 		return fmt.Errorf("failed to create mirror in cluster: %w", err)
 	}
 
-	logger.V(1).Info("mirror created")
+	// Verify mirror was actually created (catches webhook rejections, quota issues)
+	verifyMirror := &unstructured.Unstructured{}
+	verifyMirror.SetGroupVersionKind(sourceUnstructured.GroupVersionKind())
+	verifyKey := client.ObjectKey{Namespace: targetNs, Name: sourceObj.GetName()}
+	if verifyErr := r.Get(ctx, verifyKey, verifyMirror); verifyErr != nil {
+		logger.Error(verifyErr, "mirror creation verification failed - mirror may have been rejected")
+		return fmt.Errorf("mirror creation verification failed: %w", verifyErr)
+	}
+
+	logger.V(1).Info("mirror created and verified")
 	return nil
 }
 
@@ -397,11 +447,12 @@ func (r *SourceReconciler) deleteAllMirrors(ctx context.Context, sourceObj metav
 func (r *SourceReconciler) cleanupOrphanedMirrors(ctx context.Context, sourceObj metav1.Object, targetNamespaces []string) (int, error) {
 	logger := log.FromContext(ctx)
 
-	// List all namespaces
-	allNamespaces, err := r.NamespaceLister.ListNamespaces(ctx)
+	// List all namespaces using unified method for consistency
+	nsInfo, err := r.NamespaceLister.ListNamespacesWithLabels(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("failed to list namespaces: %w", err)
 	}
+	allNamespaces := nsInfo.All
 
 	// Get GVK from source object
 	sourceUnstructured, ok := sourceObj.(*unstructured.Unstructured)
@@ -514,30 +565,18 @@ func (r *SourceReconciler) resolveTargetNamespaces(ctx context.Context, sourceOb
 		}
 	}
 
-	// Get all namespaces
-	allNamespaces, err := r.NamespaceLister.ListNamespaces(ctx)
+	// Get all namespace info in a single API call (more efficient than 3 separate calls)
+	nsInfo, err := r.NamespaceLister.ListNamespacesWithLabels(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list namespaces: %w", err)
 	}
 
-	// Get namespaces with allow-mirrors label
-	allowMirrorsNamespaces, err := r.NamespaceLister.ListAllowMirrorsNamespaces(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list allow-mirrors namespaces: %w", err)
-	}
-
-	// Get namespaces that have explicitly opted out (allow-mirrors="false")
-	optOutNamespaces, err := r.NamespaceLister.ListOptOutNamespaces(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list opt-out namespaces: %w", err)
-	}
-
-	// Resolve target namespaces
+	// Resolve target namespaces using the pre-categorized namespace info
 	targetNamespaces := filter.ResolveTargetNamespaces(
 		patterns,
-		allNamespaces,
-		allowMirrorsNamespaces,
-		optOutNamespaces,
+		nsInfo.All,
+		nsInfo.AllowMirrors,
+		nsInfo.OptOut,
 		sourceObj.GetNamespace(),
 		r.Filter,
 	)

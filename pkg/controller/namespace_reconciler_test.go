@@ -310,3 +310,25 @@ func (m *mockNamespaceLister) ListOptOutNamespaces(ctx context.Context) ([]strin
 	}
 	return result, nil
 }
+
+func (m *mockNamespaceLister) ListNamespacesWithLabels(ctx context.Context) (*NamespaceInfo, error) {
+	info := &NamespaceInfo{
+		All:          m.namespaces,
+		AllowMirrors: make([]string, 0),
+		OptOut:       make([]string, 0),
+	}
+
+	for ns, allowed := range m.allowMirrors {
+		if allowed {
+			info.AllowMirrors = append(info.AllowMirrors, ns)
+		}
+	}
+
+	for ns, optedOut := range m.optOut {
+		if optedOut {
+			info.OptOut = append(info.OptOut, ns)
+		}
+	}
+
+	return info, nil
+}

@@ -21,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
+	"github.com/lukaszraczylo/kubemirror/pkg/circuitbreaker"
 	"github.com/lukaszraczylo/kubemirror/pkg/config"
 	"github.com/lukaszraczylo/kubemirror/pkg/constants"
 	"github.com/lukaszraczylo/kubemirror/pkg/controller"
@@ -164,6 +165,14 @@ func main() {
 		"included", includedList,
 	)
 
+	// Create circuit breaker for reconciliation failures
+	cb := circuitbreaker.NewWithDefaults()
+	setupLog.Info("circuit breaker initialized",
+		"failureThreshold", 5,
+		"resetTimeout", "5m",
+		"halfOpenSuccessThreshold", 2,
+	)
+
 	// Parse and configure resource types
 	var mirroredResources []config.ResourceType
 	if resourceTypes != "" {
@@ -232,6 +241,21 @@ func main() {
 		setupLog.Error(err, "unable to create manager")
 		os.Exit(1)
 	}
+
+	// Note on Field Indexes:
+	// Field indexes in controller-runtime can improve performance for in-cache lookups.
+	// For kubemirror, potential indexes include:
+	// 1. metadata.labels[kubemirror.raczylo.com/enabled] - for finding enabled resources
+	// 2. annotations[kubemirror.raczylo.com/source-uid] - for finding mirrors by source
+	//
+	// However, these are not implemented because:
+	// - Server-side filtering via label selectors already handles enabled label filtering efficiently
+	// - Mirror-to-source lookups are currently done by listing all managed resources
+	// - Dynamic resource types (unstructured) make index setup more complex
+	// - Benchmark testing is required to verify indexes improve performance before adding complexity
+	//
+	// If benchmarks show indexes would help, use:
+	//   mgr.GetFieldIndexer().IndexField(ctx, &unstructured.Unstructured{...}, indexPath, extractFunc)
 
 	// Set up signal handler context for graceful shutdown
 	signalCtx := ctrl.SetupSignalHandler()
@@ -307,6 +331,7 @@ func main() {
 				NamespaceLister: namespaceLister,
 				GVK:             gvk,
 				APIReader:       mgr.GetAPIReader(),
+				CircuitBreaker:  cb,
 			}
 		}
 
@@ -321,6 +346,7 @@ func main() {
 		// Create dynamic controller manager
 		dynamicMgr := controller.NewDynamicControllerManager(controller.DynamicManagerConfig{
 			Client:                  mgr.GetClient(),
+			APIReader:               mgr.GetAPIReader(), // Direct API reader for pre-start scans
 			Manager:                 mgr,
 			Config:                  cfg,
 			Filter:                  namespaceFilter,
@@ -363,6 +389,7 @@ func main() {
 				NamespaceLister: namespaceLister,
 				GVK:             gvk,
 				APIReader:       mgr.GetAPIReader(), // Direct API reader (bypasses cache)
+				CircuitBreaker:  cb,
 			}
 
 			if err = sourceReconciler.SetupWithManagerForResourceType(mgr, gvk); err != nil {

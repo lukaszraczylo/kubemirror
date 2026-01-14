@@ -443,6 +443,16 @@ func applyTransformations(source, mirror runtime.Object, targetNamespace string)
 		return mirror, nil
 	}
 
+	// Save original annotations to restore on failure
+	originalAnnotations := mirrorObj.GetAnnotations()
+	var savedAnnotations map[string]string
+	if originalAnnotations != nil {
+		savedAnnotations = make(map[string]string, len(originalAnnotations))
+		for k, v := range originalAnnotations {
+			savedAnnotations[k] = v
+		}
+	}
+
 	mirrorAnnotations := mirrorObj.GetAnnotations()
 	if mirrorAnnotations == nil {
 		mirrorAnnotations = make(map[string]string)
@@ -464,6 +474,8 @@ func applyTransformations(source, mirror runtime.Object, targetNamespace string)
 	// Apply transformations (transformer reads rules from mirror's annotations now)
 	transformed, err := t.Transform(mirror, ctx)
 	if err != nil {
+		// Restore original annotations on failure to avoid leaving mirror in inconsistent state
+		mirrorObj.SetAnnotations(savedAnnotations)
 		return nil, err
 	}
 

@@ -261,30 +261,18 @@ func (r *NamespaceReconciler) resolveTargetNamespaces(ctx context.Context, sourc
 		}
 	}
 
-	// Get all namespaces
-	allNamespaces, err := r.NamespaceLister.ListNamespaces(ctx)
+	// Get all namespace info in a single API call (more efficient than 3 separate calls)
+	nsInfo, err := r.NamespaceLister.ListNamespacesWithLabels(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list namespaces: %w", err)
 	}
 
-	// Get namespaces with allow-mirrors label
-	allowMirrorsNamespaces, err := r.NamespaceLister.ListAllowMirrorsNamespaces(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list allow-mirrors namespaces: %w", err)
-	}
-
-	// Get namespaces that have explicitly opted out (allow-mirrors="false")
-	optOutNamespaces, err := r.NamespaceLister.ListOptOutNamespaces(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list opt-out namespaces: %w", err)
-	}
-
-	// Resolve target namespaces
+	// Resolve target namespaces using the pre-categorized namespace info
 	targetNamespaces := filter.ResolveTargetNamespaces(
 		patterns,
-		allNamespaces,
-		allowMirrorsNamespaces,
-		optOutNamespaces,
+		nsInfo.All,
+		nsInfo.AllowMirrors,
+		nsInfo.OptOut,
 		source.GetNamespace(),
 		r.Filter,
 	)

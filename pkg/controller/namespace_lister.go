@@ -104,3 +104,51 @@ func (k *KubernetesNamespaceLister) ListOptOutNamespaces(ctx context.Context) ([
 
 	return names, nil
 }
+
+// NamespaceInfo contains categorized namespace information from a single API call.
+// This is more efficient than making 3 separate API calls.
+type NamespaceInfo struct {
+	// All contains all namespace names in the cluster
+	All []string
+	// AllowMirrors contains namespaces with allow-mirrors="true" label
+	AllowMirrors []string
+	// OptOut contains namespaces with allow-mirrors="false" label
+	OptOut []string
+}
+
+// ListNamespacesWithLabels returns all namespaces categorized by their allow-mirrors label
+// in a single API call. This is more efficient than calling ListNamespaces,
+// ListAllowMirrorsNamespaces, and ListOptOutNamespaces separately.
+// Uses direct API reads if apiReader is configured to ensure fresh data.
+func (k *KubernetesNamespaceLister) ListNamespacesWithLabels(ctx context.Context) (*NamespaceInfo, error) {
+	namespaceList := &corev1.NamespaceList{}
+
+	// Use direct API reader if available for fresh data
+	reader := k.getReader()
+	if err := reader.List(ctx, namespaceList); err != nil {
+		return nil, err
+	}
+
+	info := &NamespaceInfo{
+		All:          make([]string, 0, len(namespaceList.Items)),
+		AllowMirrors: make([]string, 0),
+		OptOut:       make([]string, 0),
+	}
+
+	for _, ns := range namespaceList.Items {
+		info.All = append(info.All, ns.Name)
+
+		// Check allow-mirrors label value
+		if ns.Labels != nil {
+			labelValue := ns.Labels[constants.LabelAllowMirrors]
+			switch labelValue {
+			case "true":
+				info.AllowMirrors = append(info.AllowMirrors, ns.Name)
+			case "false":
+				info.OptOut = append(info.OptOut, ns.Name)
+			}
+		}
+	}
+
+	return info, nil
+}

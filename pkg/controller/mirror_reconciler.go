@@ -98,6 +98,16 @@ func (r *MirrorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, err
 	}
 
+	// Check if source is being deleted - if so, let the SourceReconciler handle cleanup
+	// This prevents race conditions where both reconcilers try to delete mirrors
+	if !source.GetDeletionTimestamp().IsZero() {
+		logger.V(1).Info("source is being deleted, skipping mirror check (SourceReconciler will handle cleanup)",
+			"mirror", req.NamespacedName,
+			"sourceNamespace", sourceNs,
+			"sourceName", sourceName)
+		return ctrl.Result{}, nil
+	}
+
 	// Source exists - verify UID matches
 	actualUID := string(source.GetUID())
 	if actualUID != sourceUID {
