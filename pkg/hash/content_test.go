@@ -168,12 +168,12 @@ func TestComputeContentHash_ConfigMap(t *testing.T) {
 			name: "binaryData included in hash",
 			cm1: &corev1.ConfigMap{
 				BinaryData: map[string][]byte{
-					"file": []byte{0x00, 0x01, 0x02},
+					"file": {0x00, 0x01, 0x02},
 				},
 			},
 			cm2: &corev1.ConfigMap{
 				BinaryData: map[string][]byte{
-					"file": []byte{0x00, 0x01, 0xFF},
+					"file": {0x00, 0x01, 0xFF},
 				},
 			},
 			wantSame:  false,
@@ -482,6 +482,119 @@ func mustComputeHash(t *testing.T, obj runtime.Object) string {
 	hash, err := ComputeContentHash(obj)
 	require.NoError(t, err)
 	return hash
+}
+
+// TestComputeContentHash_NoMutation verifies that hash computation doesn't mutate the input object.
+// This is critical because NestedMap can modify the underlying map.
+func TestComputeContentHash_NoMutation(t *testing.T) {
+	t.Run("unstructured object is not mutated", func(t *testing.T) {
+		// Create an unstructured object with nested spec
+		original := &unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "Custom",
+				"metadata": map[string]interface{}{
+					"name":      "test-resource",
+					"namespace": "default",
+					"annotations": map[string]interface{}{
+						constants.AnnotationTransform: `{"rules":[{"field":"spec.value","action":"base64encode"}]}`,
+					},
+				},
+				"spec": map[string]interface{}{
+					"field1": "value1",
+					"nested": map[string]interface{}{
+						"deep": "data",
+					},
+				},
+				"status": map[string]interface{}{
+					"condition": "Ready",
+				},
+			},
+		}
+
+		// Deep copy the original to compare after hash computation
+		expectedCopy := original.DeepCopy()
+
+		// Compute hash multiple times
+		hash1, err := ComputeContentHash(original)
+		require.NoError(t, err)
+
+		hash2, err := ComputeContentHash(original)
+		require.NoError(t, err)
+
+		// Hashes should be consistent (object wasn't modified)
+		assert.Equal(t, hash1, hash2, "hash should be consistent across calls")
+
+		// Original object should be unchanged
+		assert.Equal(t, expectedCopy.Object, original.Object, "original object should not be mutated")
+	})
+
+	t.Run("secret is not mutated", func(t *testing.T) {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-secret",
+				Namespace: "default",
+				Annotations: map[string]string{
+					constants.AnnotationTransform: `{"rules":[]}`,
+				},
+			},
+			Data: map[string][]byte{
+				"password": []byte("secret123"),
+			},
+			Type: corev1.SecretTypeOpaque,
+		}
+
+		// Copy for comparison
+		originalData := make(map[string][]byte)
+		for k, v := range secret.Data {
+			originalData[k] = append([]byte(nil), v...)
+		}
+		originalAnnotations := make(map[string]string)
+		for k, v := range secret.Annotations {
+			originalAnnotations[k] = v
+		}
+
+		// Compute hash
+		_, err := ComputeContentHash(secret)
+		require.NoError(t, err)
+
+		// Verify no mutation
+		assert.Equal(t, originalData, secret.Data, "secret data should not be mutated")
+		assert.Equal(t, originalAnnotations, secret.Annotations, "secret annotations should not be mutated")
+	})
+
+	t.Run("configmap is not mutated", func(t *testing.T) {
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-cm",
+				Namespace: "default",
+			},
+			Data: map[string]string{
+				"config.yaml": "key: value",
+			},
+			BinaryData: map[string][]byte{
+				"binary": {0x00, 0x01, 0x02},
+			},
+		}
+
+		// Copy for comparison
+		originalData := make(map[string]string)
+		for k, v := range cm.Data {
+			originalData[k] = v
+		}
+		originalBinaryData := make(map[string][]byte)
+		for k, v := range cm.BinaryData {
+			originalBinaryData[k] = append([]byte(nil), v...)
+		}
+
+		// Compute hash
+		_, err := ComputeContentHash(cm)
+		require.NoError(t, err)
+
+		// Verify no mutation
+		assert.Equal(t, originalData, cm.Data, "configmap data should not be mutated")
+		assert.Equal(t, originalBinaryData, cm.BinaryData, "configmap binary data should not be mutated")
+	})
 }
 
 // Benchmark tests

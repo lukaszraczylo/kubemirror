@@ -160,8 +160,17 @@ func createUnstructuredMirror(source runtime.Object, targetNamespace, sourceHash
 }
 
 // buildMirrorAnnotations builds the ownership annotations for a mirror resource.
+// Returns empty map if source doesn't implement metav1.Object.
 func buildMirrorAnnotations(source runtime.Object, sourceHash string) map[string]string {
-	sourceObj, _ := source.(metav1.Object)
+	sourceObj, ok := source.(metav1.Object)
+	if !ok {
+		// This should never happen for valid Kubernetes resources.
+		// Return minimal annotations with just the hash.
+		return map[string]string{
+			constants.AnnotationSourceContentHash: sourceHash,
+			constants.AnnotationLastSyncTime:      time.Now().UTC().Format(time.RFC3339),
+		}
+	}
 
 	annotations := map[string]string{
 		constants.AnnotationSourceNamespace:   sourceObj.GetNamespace(),
@@ -196,24 +205,34 @@ func UpdateMirror(mirror, source runtime.Object) error {
 	// Update based on type
 	switch m := mirror.(type) {
 	case *corev1.Secret:
-		src := source.(*corev1.Secret)
+		src, ok := source.(*corev1.Secret)
+		if !ok {
+			return fmt.Errorf("mirror is Secret but source is %T", source)
+		}
 		m.Data = src.Data
 		m.Type = src.Type
 		updateMirrorAnnotations(m, source, sourceHash)
 	case *corev1.ConfigMap:
-		src := source.(*corev1.ConfigMap)
+		src, ok := source.(*corev1.ConfigMap)
+		if !ok {
+			return fmt.Errorf("mirror is ConfigMap but source is %T", source)
+		}
 		m.Data = src.Data
 		m.BinaryData = src.BinaryData
 		updateMirrorAnnotations(m, source, sourceHash)
 	default:
 		// Unstructured
-		if err := updateUnstructuredMirror(mirror, source, sourceHash); err != nil {
+		err = updateUnstructuredMirror(mirror, source, sourceHash)
+		if err != nil {
 			return err
 		}
 	}
 
 	// Apply transformations after updating data (only if transformation rules exist)
-	mirrorObj, _ := mirror.(metav1.Object)
+	mirrorObj, ok := mirror.(metav1.Object)
+	if !ok {
+		return fmt.Errorf("mirror does not implement metav1.Object, got %T", mirror)
+	}
 	targetNamespace := mirrorObj.GetNamespace()
 	transformed, err := applyTransformations(source, mirror, targetNamespace)
 	if err != nil {
@@ -280,8 +299,6 @@ func convertToByteMap(data map[string]interface{}) map[string][]byte {
 
 // updateMirrorAnnotations updates the ownership annotations on a mirror.
 func updateMirrorAnnotations(mirror metav1.Object, source runtime.Object, sourceHash string) {
-	sourceObj, _ := source.(metav1.Object)
-
 	annotations := mirror.GetAnnotations()
 	if annotations == nil {
 		annotations = make(map[string]string)
@@ -290,12 +307,16 @@ func updateMirrorAnnotations(mirror metav1.Object, source runtime.Object, source
 	annotations[constants.AnnotationSourceContentHash] = sourceHash
 	annotations[constants.AnnotationLastSyncTime] = time.Now().UTC().Format(time.RFC3339)
 
-	if sourceObj.GetGeneration() > 0 {
-		annotations[constants.AnnotationSourceGeneration] = fmt.Sprintf("%d", sourceObj.GetGeneration())
-	}
+	// Safely extract source metadata if available
+	sourceObj, ok := source.(metav1.Object)
+	if ok {
+		if sourceObj.GetGeneration() > 0 {
+			annotations[constants.AnnotationSourceGeneration] = fmt.Sprintf("%d", sourceObj.GetGeneration())
+		}
 
-	if sourceObj.GetResourceVersion() != "" {
-		annotations[constants.AnnotationSourceResourceVersion] = sourceObj.GetResourceVersion()
+		if sourceObj.GetResourceVersion() != "" {
+			annotations[constants.AnnotationSourceResourceVersion] = sourceObj.GetResourceVersion()
+		}
 	}
 
 	mirror.SetAnnotations(annotations)
@@ -304,8 +325,14 @@ func updateMirrorAnnotations(mirror metav1.Object, source runtime.Object, source
 // updateUnstructuredMirror updates an unstructured mirror.
 // Uses generic field introspection to handle any resource type (Secrets, ConfigMaps, CRDs).
 func updateUnstructuredMirror(mirror, source runtime.Object, sourceHash string) error {
-	m := mirror.(*unstructured.Unstructured)
-	s := source.(*unstructured.Unstructured)
+	m, ok := mirror.(*unstructured.Unstructured)
+	if !ok {
+		return fmt.Errorf("mirror is not *unstructured.Unstructured, got %T", mirror)
+	}
+	s, ok := source.(*unstructured.Unstructured)
+	if !ok {
+		return fmt.Errorf("source is not *unstructured.Unstructured, got %T", source)
+	}
 
 	// Fields to skip (Kubernetes-managed fields, not user content)
 	// These are managed by Kubernetes API server or controllers
@@ -416,6 +443,16 @@ func applyTransformations(source, mirror runtime.Object, targetNamespace string)
 		return mirror, nil
 	}
 
+	// Save original annotations to restore on failure
+	originalAnnotations := mirrorObj.GetAnnotations()
+	var savedAnnotations map[string]string
+	if originalAnnotations != nil {
+		savedAnnotations = make(map[string]string, len(originalAnnotations))
+		for k, v := range originalAnnotations {
+			savedAnnotations[k] = v
+		}
+	}
+
 	mirrorAnnotations := mirrorObj.GetAnnotations()
 	if mirrorAnnotations == nil {
 		mirrorAnnotations = make(map[string]string)
@@ -437,6 +474,8 @@ func applyTransformations(source, mirror runtime.Object, targetNamespace string)
 	// Apply transformations (transformer reads rules from mirror's annotations now)
 	transformed, err := t.Transform(mirror, ctx)
 	if err != nil {
+		// Restore original annotations on failure to avoid leaving mirror in inconsistent state
+		mirrorObj.SetAnnotations(savedAnnotations)
 		return nil, err
 	}
 

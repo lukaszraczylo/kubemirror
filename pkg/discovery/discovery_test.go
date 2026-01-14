@@ -86,3 +86,33 @@ func TestIsDeniedResourceType(t *testing.T) {
 		})
 	}
 }
+
+func TestIsHighCardinalityResource(t *testing.T) {
+	tests := []struct {
+		name string
+		kind string
+		want bool
+	}{
+		// High cardinality resources (should warn)
+		{name: "ServiceAccount", kind: "ServiceAccount", want: true},
+		{name: "Role", kind: "Role", want: true},
+		{name: "RoleBinding", kind: "RoleBinding", want: true},
+		{name: "NetworkPolicy", kind: "NetworkPolicy", want: true},
+		{name: "ServiceMonitor", kind: "ServiceMonitor", want: true},
+		{name: "VirtualService", kind: "VirtualService", want: true},
+
+		// Not high cardinality (no warning needed)
+		{name: "Secret", kind: "Secret", want: false},
+		{name: "ConfigMap", kind: "ConfigMap", want: false},
+		{name: "Service", kind: "Service", want: false},
+		{name: "Deployment", kind: "Deployment", want: false},
+		{name: "Middleware", kind: "Middleware", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isHighCardinalityResource(tt.kind)
+			assert.Equal(t, tt.want, got, "isHighCardinalityResource(%s) = %v, want %v", tt.kind, got, tt.want)
+		})
+	}
+}

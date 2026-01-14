@@ -24,7 +24,13 @@ type MirrorReconciler struct {
 
 // Reconcile checks if a mirrored resource's source still exists, and deletes the mirror if orphaned.
 func (r *MirrorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
+	logger := log.FromContext(ctx).WithValues(
+		"mirrorNamespace", req.Namespace,
+		"mirrorName", req.Name,
+		"kind", r.GVK.Kind,
+		"group", r.GVK.Group,
+		"version", r.GVK.Version,
+	)
 
 	// Fetch the mirror resource
 	mirror := &unstructured.Unstructured{}
@@ -73,9 +79,10 @@ func (r *MirrorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 				"sourceName", sourceName,
 				"sourceUID", sourceUID)
 
-			if err := r.Delete(ctx, mirror); err != nil {
-				logger.Error(err, "failed to delete orphaned mirror")
-				return ctrl.Result{}, err
+			deleteErr := r.Delete(ctx, mirror)
+			if deleteErr != nil {
+				logger.Error(deleteErr, "failed to delete orphaned mirror")
+				return ctrl.Result{}, deleteErr
 			}
 
 			logger.Info("orphaned mirror deleted successfully",
@@ -89,6 +96,16 @@ func (r *MirrorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		logger.Error(err, "failed to fetch source resource for mirror",
 			"sourceNamespace", sourceNs, "sourceName", sourceName)
 		return ctrl.Result{}, err
+	}
+
+	// Check if source is being deleted - if so, let the SourceReconciler handle cleanup
+	// This prevents race conditions where both reconcilers try to delete mirrors
+	if !source.GetDeletionTimestamp().IsZero() {
+		logger.V(1).Info("source is being deleted, skipping mirror check (SourceReconciler will handle cleanup)",
+			"mirror", req.NamespacedName,
+			"sourceNamespace", sourceNs,
+			"sourceName", sourceName)
+		return ctrl.Result{}, nil
 	}
 
 	// Source exists - verify UID matches

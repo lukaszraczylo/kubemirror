@@ -13,46 +13,22 @@ type TransformRules struct {
 
 // Rule represents a single transformation rule.
 type Rule struct {
-	// Path is the JSONPath to the field to transform (e.g., "data.LOG_LEVEL", "metadata.labels.env")
-	Path string `yaml:"path"`
-
-	// Value sets a static value (mutually exclusive with Template, Merge, Delete)
-	Value *string `yaml:"value,omitempty"`
-
-	// Template uses Go templates to generate the value (mutually exclusive with Value, Merge, Delete)
-	Template *string `yaml:"template,omitempty"`
-
-	// Merge merges a map into the target field (mutually exclusive with Value, Template, Delete)
-	Merge map[string]interface{} `yaml:"merge,omitempty"`
-
-	// Delete removes the field (mutually exclusive with Value, Template, Merge)
-	Delete bool `yaml:"delete,omitempty"`
-
-	// NamespacePattern is an optional glob pattern that limits this rule to specific target namespaces
-	// Examples: "prod-*", "*-staging", "preprod-*"
-	// If not specified, the rule applies to all namespaces
-	NamespacePattern *string `yaml:"namespacePattern,omitempty"`
+	Value            *string                `yaml:"value,omitempty"`
+	Template         *string                `yaml:"template,omitempty"`
+	Merge            map[string]interface{} `yaml:"merge,omitempty"`
+	NamespacePattern *string                `yaml:"namespacePattern,omitempty"`
+	Path             string                 `yaml:"path"`
+	Delete           bool                   `yaml:"delete,omitempty"`
 }
 
 // TransformContext provides context variables for template evaluation.
 type TransformContext struct {
-	// TargetNamespace is the namespace where the mirror is being created
+	Labels          map[string]string
+	Annotations     map[string]string
 	TargetNamespace string
-
-	// SourceNamespace is the namespace of the source resource
 	SourceNamespace string
-
-	// SourceName is the name of the source resource
-	SourceName string
-
-	// TargetName is the name of the target resource (usually same as source)
-	TargetName string
-
-	// Labels is a copy of the source resource's labels
-	Labels map[string]string
-
-	// Annotations is a copy of the source resource's annotations
-	Annotations map[string]string
+	SourceName      string
+	TargetName      string
 }
 
 // TransformOptions configures the transformation behavior.

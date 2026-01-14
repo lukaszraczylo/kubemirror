@@ -21,11 +21,17 @@ import (
 // These are intentionally not exported methods on DynamicControllerManager
 // to avoid exposing them in production code
 
-// getRegisteredCount returns the number of currently registered controllers (test helper)
+// getRegisteredCount returns the number of fully registered controllers (test helper)
 func getRegisteredCount(d *DynamicControllerManager) int {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	return len(d.registeredControllers)
+	count := 0
+	for _, state := range d.registrationState {
+		if state == StateFullyRegistered {
+			count++
+		}
+	}
+	return count
 }
 
 // getActiveResourceTypes returns the currently active resource types (test helper)
@@ -49,8 +55,8 @@ func TestDynamicControllerManager_FindActiveResourceTypes(t *testing.T) {
 		name                string
 		availableResources  []config.ResourceType
 		existingResources   []*unstructured.Unstructured
-		expectedActiveCount int
 		expectedActiveTypes []string
+		expectedActiveCount int
 	}{
 		{
 			name: "no resources marked for mirroring",
@@ -242,14 +248,27 @@ func TestDynamicControllerManager_FindActiveResourceTypes(t *testing.T) {
 
 func TestDynamicControllerManager_GetRegisteredCount(t *testing.T) {
 	mgr := &DynamicControllerManager{
-		registeredControllers: map[string]bool{
-			"Secret.v1.":    true,
-			"ConfigMap.v1.": true,
+		registrationState: map[string]RegistrationState{
+			"Secret.v1.":    StateFullyRegistered,
+			"ConfigMap.v1.": StateFullyRegistered,
 		},
 	}
 
 	count := getRegisteredCount(mgr)
 	assert.Equal(t, 2, count)
+}
+
+func TestDynamicControllerManager_GetRegisteredCount_PartialStates(t *testing.T) {
+	mgr := &DynamicControllerManager{
+		registrationState: map[string]RegistrationState{
+			"Secret.v1.":     StateFullyRegistered,
+			"ConfigMap.v1.":  StateSourceOnly,    // Partial - shouldn't count
+			"Deployment.v1.": StateNotRegistered, // Not registered - shouldn't count
+		},
+	}
+
+	count := getRegisteredCount(mgr)
+	assert.Equal(t, 1, count, "only fully registered controllers should be counted")
 }
 
 func TestDynamicControllerManager_GetActiveResourceTypes(t *testing.T) {
@@ -319,22 +338,22 @@ func TestDynamicControllerManager_ScanInterval(t *testing.T) {
 func TestDynamicControllerManager_RegistrationTracking(t *testing.T) {
 	// Test that registration tracking works correctly
 	mgr := &DynamicControllerManager{
-		registeredControllers: make(map[string]bool),
-		activeResourceTypes:   make(map[string]schema.GroupVersionKind),
+		registrationState:   make(map[string]RegistrationState),
+		activeResourceTypes: make(map[string]schema.GroupVersionKind),
 	}
 
 	gvk := schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"}
 	gvkStr := "Secret.v1."
 
 	// Initially not registered
-	assert.False(t, mgr.registeredControllers[gvkStr])
+	assert.Equal(t, StateNotRegistered, mgr.registrationState[gvkStr])
 	assert.Equal(t, 0, getRegisteredCount(mgr))
 
-	// Mark as registered
-	mgr.registeredControllers[gvkStr] = true
+	// Mark as fully registered
+	mgr.registrationState[gvkStr] = StateFullyRegistered
 	mgr.activeResourceTypes[gvkStr] = gvk
 
-	assert.True(t, mgr.registeredControllers[gvkStr])
+	assert.Equal(t, StateFullyRegistered, mgr.registrationState[gvkStr])
 	assert.Equal(t, 1, getRegisteredCount(mgr))
 
 	activeTypes := getActiveResourceTypes(mgr)
@@ -342,11 +361,87 @@ func TestDynamicControllerManager_RegistrationTracking(t *testing.T) {
 	assert.Equal(t, gvk, activeTypes[0])
 }
 
+func TestDynamicControllerManager_PartialRegistration(t *testing.T) {
+	// Test that partial registration (source only) is tracked correctly
+	mgr := &DynamicControllerManager{
+		registrationState:   make(map[string]RegistrationState),
+		activeResourceTypes: make(map[string]schema.GroupVersionKind),
+	}
+
+	gvk := schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"}
+	gvkStr := "Secret.v1."
+
+	// Mark as partially registered (source only)
+	mgr.registrationState[gvkStr] = StateSourceOnly
+	mgr.activeResourceTypes[gvkStr] = gvk
+
+	// Should not count as registered
+	assert.Equal(t, StateSourceOnly, mgr.registrationState[gvkStr])
+	assert.Equal(t, 0, getRegisteredCount(mgr), "partial registration should not count as fully registered")
+
+	// But should be in active resource types
+	activeTypes := getActiveResourceTypes(mgr)
+	assert.Equal(t, 1, len(activeTypes))
+
+	// Complete the registration
+	mgr.registrationState[gvkStr] = StateFullyRegistered
+	assert.Equal(t, 1, getRegisteredCount(mgr), "should now count as fully registered")
+}
+
+func TestDynamicControllerManager_GetRegistrationStats(t *testing.T) {
+	mgr := &DynamicControllerManager{
+		registrationState: map[string]RegistrationState{
+			"Secret.v1.":     StateFullyRegistered,
+			"ConfigMap.v1.":  StateFullyRegistered,
+			"Deployment.v1.": StateSourceOnly,
+			"Service.v1.":    StateSourceOnly,
+			"Ingress.v1.":    StateNotRegistered,
+		},
+	}
+
+	fullyReg, sourceOnly, notReg := mgr.GetRegistrationStats()
+
+	assert.Equal(t, 2, fullyReg, "should have 2 fully registered")
+	assert.Equal(t, 2, sourceOnly, "should have 2 source-only")
+	assert.Equal(t, 1, notReg, "should have 1 not registered")
+}
+
+func TestDynamicControllerManager_GetRegistrationState(t *testing.T) {
+	mgr := &DynamicControllerManager{
+		registrationState: map[string]RegistrationState{
+			"Secret.v1.":    StateFullyRegistered,
+			"ConfigMap.v1.": StateSourceOnly,
+		},
+	}
+
+	assert.Equal(t, StateFullyRegistered, mgr.GetRegistrationState("Secret.v1."))
+	assert.Equal(t, StateSourceOnly, mgr.GetRegistrationState("ConfigMap.v1."))
+	assert.Equal(t, StateNotRegistered, mgr.GetRegistrationState("Unknown.v1."), "unknown GVK should be not registered")
+}
+
+func TestRegistrationState_String(t *testing.T) {
+	tests := []struct {
+		expected string
+		state    RegistrationState
+	}{
+		{"not-registered", StateNotRegistered},
+		{"source-only", StateSourceOnly},
+		{"fully-registered", StateFullyRegistered},
+		{"unknown", RegistrationState(99)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.state.String())
+		})
+	}
+}
+
 // TestDynamicControllerManager_ConcurrentAccess tests thread-safety
 func TestDynamicControllerManager_ConcurrentAccess(t *testing.T) {
 	mgr := &DynamicControllerManager{
-		registeredControllers: make(map[string]bool),
-		activeResourceTypes:   make(map[string]schema.GroupVersionKind),
+		registrationState:   make(map[string]RegistrationState),
+		activeResourceTypes: make(map[string]schema.GroupVersionKind),
 	}
 
 	// Simulate concurrent reads and writes
@@ -356,7 +451,7 @@ func TestDynamicControllerManager_ConcurrentAccess(t *testing.T) {
 	go func() {
 		for i := 0; i < 100; i++ {
 			mgr.mu.Lock()
-			mgr.registeredControllers["test"] = true
+			mgr.registrationState["test"] = StateFullyRegistered
 			mgr.mu.Unlock()
 			time.Sleep(1 * time.Millisecond)
 		}
@@ -381,7 +476,7 @@ func TestDynamicControllerManager_ConcurrentAccess(t *testing.T) {
 	}
 
 	// Should not panic and should have final state
-	assert.True(t, mgr.registeredControllers["test"])
+	assert.Equal(t, StateFullyRegistered, mgr.registrationState["test"])
 }
 
 func TestDynamicControllerManager_UnstructuredResourceHandling(t *testing.T) {

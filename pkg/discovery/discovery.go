@@ -10,9 +10,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/lukaszraczylo/kubemirror/pkg/config"
 )
+
+var discoveryLog = ctrl.Log.WithName("discovery")
 
 // ResourceDiscovery discovers all mirrorable resource types in a cluster.
 type ResourceDiscovery struct {
@@ -34,6 +37,8 @@ func NewResourceDiscovery(cfg *rest.Config) (*ResourceDiscovery, error) {
 // DiscoverMirrorableResources discovers all resource types that can be mirrored.
 // It filters out resources that shouldn't be mirrored based on a deny list.
 func (d *ResourceDiscovery) DiscoverMirrorableResources(ctx context.Context) ([]config.ResourceType, error) {
+	logger := discoveryLog.WithName("discover")
+
 	// Get all API resources in the cluster
 	_, apiResourceLists, err := d.discoveryClient.ServerGroupsAndResources()
 	if err != nil {
@@ -42,10 +47,12 @@ func (d *ResourceDiscovery) DiscoverMirrorableResources(ctx context.Context) ([]
 		if !discovery.IsGroupDiscoveryFailedError(err) {
 			return nil, fmt.Errorf("failed to discover API resources: %w", err)
 		}
+		logger.V(1).Info("some API groups had discovery errors, continuing with available resources")
 	}
 
 	var resources []config.ResourceType
 	seen := make(map[string]bool) // Deduplicate
+	var deniedCount int
 
 	for _, apiResourceList := range apiResourceLists {
 		gv, err := schema.ParseGroupVersion(apiResourceList.GroupVersion)
@@ -71,7 +78,21 @@ func (d *ResourceDiscovery) DiscoverMirrorableResources(ctx context.Context) ([]
 
 			// Skip denied resource types
 			if isDeniedResourceType(apiResource.Kind) {
+				deniedCount++
+				logger.V(2).Info("skipping denied resource type",
+					"kind", apiResource.Kind,
+					"group", gv.Group,
+					"version", gv.Version)
 				continue
+			}
+
+			// Warn about potentially high-cardinality resource types that aren't in deny list
+			if isHighCardinalityResource(apiResource.Kind) {
+				logger.Info("WARNING: discovered potentially high-cardinality resource type",
+					"kind", apiResource.Kind,
+					"group", gv.Group,
+					"version", gv.Version,
+					"recommendation", "Consider adding to deny list if high volume is observed")
 			}
 
 			rt := config.ResourceType{
@@ -90,6 +111,10 @@ func (d *ResourceDiscovery) DiscoverMirrorableResources(ctx context.Context) ([]
 			resources = append(resources, rt)
 		}
 	}
+
+	logger.Info("resource discovery complete",
+		"discovered", len(resources),
+		"denied", deniedCount)
 
 	return resources, nil
 }
@@ -315,4 +340,35 @@ var deniedKinds = map[string]bool{
 
 func isDeniedResourceType(kind string) bool {
 	return deniedKinds[kind]
+}
+
+// highCardinalityKinds are resource types that might generate high volumes of objects.
+// These aren't denied by default but warrant monitoring when discovered.
+var highCardinalityKinds = map[string]bool{
+	// Resources that might have many instances per namespace
+	"ServiceAccount":          true, // Often auto-created per deployment
+	"Role":                    true, // Can be many per namespace
+	"RoleBinding":             true, // Can be many per namespace
+	"NetworkPolicy":           true, // Can be many per namespace
+	"LimitRange":              true, // Usually few but triggers on all namespace changes
+	"ResourceQuota":           true, // Usually few but triggers on all namespace changes
+	"HorizontalPodAutoscaler": true, // One per deployment/statefulset
+
+	// CRD resources that might have high cardinality
+	"ServiceEntry":       true, // Istio - can have many
+	"VirtualService":     true, // Istio - can have many
+	"DestinationRule":    true, // Istio - can have many
+	"EnvoyFilter":        true, // Istio - can have many
+	"Sidecar":            true, // Istio - can have many
+	"PeerAuthentication": true, // Istio - can have many
+
+	// Prometheus-style monitoring resources
+	"ServiceMonitor": true, // Often one per service
+	"PodMonitor":     true, // Often one per pod type
+	"PrometheusRule": true, // Can have many rules
+}
+
+// isHighCardinalityResource checks if a resource type might generate high volumes.
+func isHighCardinalityResource(kind string) bool {
+	return highCardinalityKinds[kind]
 }

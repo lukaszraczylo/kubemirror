@@ -10,9 +10,9 @@ import (
 func TestRule_Validate(t *testing.T) {
 	tests := []struct {
 		name    string
+		errMsg  string
 		rule    Rule
 		wantErr bool
-		errMsg  string
 	}{
 		// Good cases
 		{
@@ -191,8 +191,8 @@ func TestRule_Type(t *testing.T) {
 func TestRuleType_String(t *testing.T) {
 	tests := []struct {
 		name     string
-		ruleType RuleType
 		want     string
+		ruleType RuleType
 	}{
 		{name: "value", ruleType: RuleTypeValue, want: "value"},
 		{name: "template", ruleType: RuleTypeTemplate, want: "template"},
