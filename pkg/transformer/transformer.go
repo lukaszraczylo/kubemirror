@@ -15,6 +15,18 @@ import (
 	"github.com/lukaszraczylo/kubemirror/pkg/constants"
 )
 
+// maxConcurrentTemplateExecutions caps the number of in-flight template
+// executions across the process. text/template.Execute is not context-aware,
+// so when applyTemplateRule times out the executor goroutine continues to
+// run until the template returns on its own. This semaphore bounds the
+// damage from a pathological template (e.g. {{ range }} that never
+// terminates): once the cap is hit, applyTemplateRule fails fast instead
+// of leaking another runaway goroutine. The cap is intentionally generous
+// — normal workloads should never approach it.
+const maxConcurrentTemplateExecutions = 64
+
+var templateExecSemaphore = make(chan struct{}, maxConcurrentTemplateExecutions)
+
 // Transformer applies transformation rules to Kubernetes resources.
 type Transformer struct {
 	options TransformOptions
@@ -166,6 +178,19 @@ func (t *Transformer) applyTemplateRule(u *unstructured.Unstructured, rule Rule,
 	tmpl, err := template.New("transform").Funcs(templateFuncs()).Parse(*rule.Template)
 	if err != nil {
 		return fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	// Acquire a slot in the global template-execution semaphore. If saturated,
+	// fail fast rather than spawning yet another goroutine that may leak when
+	// it times out (text/template is not context-aware so timed-out goroutines
+	// continue running until the template returns).
+	select {
+	case templateExecSemaphore <- struct{}{}:
+		defer func() { <-templateExecSemaphore }()
+	default:
+		return fmt.Errorf("template execution rejected: %d concurrent executions in flight, "+
+			"likely indicates one or more runaway templates leaking goroutines",
+			maxConcurrentTemplateExecutions)
 	}
 
 	// Execute template with timeout

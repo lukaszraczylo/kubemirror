@@ -734,6 +734,44 @@ func TestTransformer_TemplateTimeout(t *testing.T) {
 	t.Skip("Template timeout testing is unreliable in unit tests - covered by integration tests")
 }
 
+func TestTransformer_TemplateConcurrencyCap(t *testing.T) {
+	// Regression (H3): text/template.Execute is not context-aware, so a
+	// timed-out template execution leaves its goroutine running until the
+	// template returns on its own. We bound that by a global semaphore;
+	// when saturated, applyTemplateRule must fail fast instead of spawning
+	// another goroutine.
+	//
+	// This test saturates the semaphore directly, then asserts the next
+	// call returns the cap-exceeded error rather than blocking or panicking.
+	for i := 0; i < maxConcurrentTemplateExecutions; i++ {
+		templateExecSemaphore <- struct{}{}
+	}
+	defer func() {
+		// Drain whatever the test left in the semaphore so subsequent tests
+		// see a clean state.
+		for {
+			select {
+			case <-templateExecSemaphore:
+			default:
+				return
+			}
+		}
+	}()
+
+	tmpl := "hello"
+	tr := NewDefaultTransformer()
+	rule := Rule{Path: "data.greeting", Template: &tmpl}
+	u := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"data":       map[string]interface{}{},
+	}}
+
+	err := tr.applyTemplateRule(u, rule, TransformContext{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rejected", "saturated semaphore must reject new template executions")
+}
+
 func TestMatchGlob(t *testing.T) {
 	tests := []struct {
 		name     string

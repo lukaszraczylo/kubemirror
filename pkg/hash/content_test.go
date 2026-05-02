@@ -641,3 +641,76 @@ func BenchmarkNeedsSync(b *testing.B) {
 		_, _ = NeedsSync(source, target, annotations)
 	}
 }
+func TestComputeContentHash_Unstructured_HashesAllNonMetaFields(t *testing.T) {
+	// Regression (M7): the previous implementation only hashed `spec` when it
+	// was present, dropping any other top-level content (data, type, custom
+	// CRD fields). Drift to those fields was invisible until the next resync.
+	objSpecOnly := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Custom",
+		"spec":       map[string]interface{}{"field": "v1"},
+		"data":       map[string]interface{}{"k": "v1"},
+	}}
+	objSpecAndDifferentData := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Custom",
+		"spec":       map[string]interface{}{"field": "v1"},
+		"data":       map[string]interface{}{"k": "v2"}, // only data differs
+	}}
+
+	h1, err := ComputeContentHash(objSpecOnly)
+	require.NoError(t, err)
+	h2, err := ComputeContentHash(objSpecAndDifferentData)
+	require.NoError(t, err)
+	assert.NotEqual(t, h1, h2, "data field must contribute to hash even when spec exists")
+}
+
+func TestComputeContentHash_Unstructured_TransformIncludesLabelsAndAnnotations(t *testing.T) {
+	// Regression (M6): templates can read source labels/annotations via
+	// TransformContext. When a transform annotation is present, label /
+	// annotation changes must therefore re-hash so NeedsSync re-renders.
+	make := func(label, annot string) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]interface{}{
+				"labels":      map[string]interface{}{"app": label},
+				"annotations": map[string]interface{}{constants.AnnotationTransform: "rules: []", "tier": annot},
+			},
+			"data": map[string]interface{}{"k": "v"},
+		}}
+	}
+
+	base, err := ComputeContentHash(make("v1", "prod"))
+	require.NoError(t, err)
+
+	labelChanged, err := ComputeContentHash(make("v2", "prod"))
+	require.NoError(t, err)
+	assert.NotEqual(t, base, labelChanged, "label change must re-hash when transform is present")
+
+	annotChanged, err := ComputeContentHash(make("v1", "stage"))
+	require.NoError(t, err)
+	assert.NotEqual(t, base, annotChanged, "annotation change must re-hash when transform is present")
+}
+
+func TestComputeContentHash_Unstructured_LabelChangesIgnoredWithoutTransform(t *testing.T) {
+	// Counterpart to the above: when there is NO transform annotation, label
+	// changes must NOT churn the hash — that would cause unnecessary mirror
+	// re-writes for plain (non-transformed) mirrors.
+	make := func(label string) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]interface{}{
+				"labels": map[string]interface{}{"app": label},
+			},
+			"data": map[string]interface{}{"k": "v"},
+		}}
+	}
+
+	h1, err := ComputeContentHash(make("v1"))
+	require.NoError(t, err)
+	h2, err := ComputeContentHash(make("v2"))
+	require.NoError(t, err)
+	assert.Equal(t, h1, h2, "label changes must not re-hash without a transform annotation")
+}

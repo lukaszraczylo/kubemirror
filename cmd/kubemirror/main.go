@@ -115,8 +115,10 @@ func main() {
 	flag.DurationVar(&watcherScanInterval, "watcher-scan-interval", 5*time.Minute,
 		"Interval for scanning cluster to detect new resource types needing watchers (lazy-watcher-init mode only).")
 
+	// Default to production logger (JSON output, no DPanic-on-error). Operators
+	// can opt into development mode via the --zap-devel flag bound below.
 	opts := zap.Options{
-		Development: true,
+		Development: false,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -281,10 +283,9 @@ func main() {
 			os.Exit(1)
 		}
 
-		// Wait for initial discovery with 30s timeout
-		waitCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		err = discoveryMgr.WaitForInitialDiscovery(waitCtx, 30*time.Second)
+		// Wait for initial discovery with 30s timeout, anchored on the signal
+		// context so SIGTERM during startup actually aborts the wait.
+		err = discoveryMgr.WaitForInitialDiscovery(signalCtx, 30*time.Second)
 		if err != nil {
 			setupLog.Error(err, "timeout waiting for initial resource discovery")
 			os.Exit(1)

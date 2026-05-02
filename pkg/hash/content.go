@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -85,48 +86,68 @@ func extractConfigMapContent(cm *corev1.ConfigMap) map[string]interface{} {
 }
 
 // extractUnstructuredContent extracts content from an unstructured resource (CRDs, etc.).
+//
+// Hashes every non-Kubernetes-managed field at the top level — not only spec
+// — so resources with both spec and data (e.g. an unstructured Secret/CM, or
+// a CRD using a custom schema) detect drift on every content field, matching
+// the fields that updateUnstructuredMirror copies to the mirror.
+//
+// When a transform annotation is present the source's labels and annotations
+// are also folded into the hash, because templates can read them via
+// TransformContext.Labels / .Annotations and a label change would otherwise
+// be invisible to NeedsSync.
 func extractUnstructuredContent(obj runtime.Object) (interface{}, error) {
-	// Convert to unstructured
 	unstructuredObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert to unstructured: %w", err)
 	}
 
-	u := &unstructured.Unstructured{Object: unstructuredObj}
-
 	// Make a deep copy to avoid race conditions when accessing nested fields
-	// NestedMap modifies the underlying map, so we need our own copy
-	uCopy := u.DeepCopy()
+	// (NestedMap may modify the underlying map).
+	u := (&unstructured.Unstructured{Object: unstructuredObj}).DeepCopy()
 
-	// Extract spec (most resources have spec)
-	spec, found, err := unstructured.NestedMap(uCopy.Object, "spec")
-	if err != nil {
-		return nil, fmt.Errorf("failed to extract spec: %w", err)
+	skipFields := map[string]bool{
+		"metadata":   true,
+		"status":     true,
+		"apiVersion": true,
+		"kind":       true,
 	}
 
 	content := make(map[string]interface{})
-	if found {
-		content["spec"] = spec
-	}
-
-	// For resources without spec, include all fields except metadata and status
-	if !found {
-		for key, value := range uCopy.Object {
-			if key != "metadata" && key != "status" && key != "apiVersion" && key != "kind" {
-				content[key] = value
-			}
+	for key, value := range u.Object {
+		if !skipFields[key] {
+			content[key] = value
 		}
 	}
 
-	// Include transform annotation in hash so changes to transformation rules trigger updates
-	annotations := uCopy.GetAnnotations()
-	if annotations != nil {
-		if transform, exists := annotations[constants.AnnotationTransform]; exists {
-			content["transform"] = transform
-		}
+	annotations := u.GetAnnotations()
+	if transform, exists := annotations[constants.AnnotationTransform]; exists && transform != "" {
+		content["transform"] = transform
+		// Templates can read source labels and annotations; include them so a
+		// label/annotation change triggers re-render of transformed mirrors.
+		// Filter out the kubemirror.raczylo.com/* keys to avoid the source's
+		// own bookkeeping (sync-status annotation, etc.) churning the hash.
+		content["sourceLabels"] = filterKubeMirror(u.GetLabels())
+		content["sourceAnnotations"] = filterKubeMirror(annotations)
 	}
 
 	return content, nil
+}
+
+// filterKubeMirror returns a copy of m with all kubemirror.raczylo.com/* keys
+// removed. Used to exclude controller-managed keys from content hashing so
+// the controller's own writes don't churn the hash.
+func filterKubeMirror(m map[string]string) map[string]string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		if !strings.HasPrefix(k, constants.Domain+"/") {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // NeedsSync determines if a target resource needs to be synced based on content changes.
