@@ -3,6 +3,7 @@ package controller
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"slices"
 	"time"
@@ -194,6 +195,22 @@ func (r *SourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			return r.handleDisabled(ctx, sourceObj)
 		}
 		// No finalizer, just skip
+		return ctrl.Result{}, nil
+	}
+
+	// Refuse to mirror sensitive Secret types (service-account tokens, bootstrap
+	// tokens, helm release blobs). Mirroring these to other namespaces is a
+	// credential exposure path. If a finalizer is already set (the resource was
+	// enabled before we started enforcing this list), tear down via handleDisabled
+	// so any prior mirrors are cleaned up.
+	if isBlacklistedSecret(sourceObj) {
+		secretType, _, _ := unstructured.NestedString(sourceObj.Object, "type")
+		logger.Info("refusing to mirror blacklisted Secret type",
+			"type", secretType,
+			"reason", "credential exposure risk")
+		if slices.Contains(sourceObj.GetFinalizers(), constants.FinalizerName) {
+			return r.handleDisabled(ctx, sourceObj)
+		}
 		return ctrl.Result{}, nil
 	}
 
@@ -401,44 +418,65 @@ func (r *SourceReconciler) reconcileMirror(ctx context.Context, source runtime.O
 	return nil
 }
 
-// deleteAllMirrors deletes all mirrors for a source resource.
+// deleteAllMirrors deletes all mirrors that this source owns across the cluster.
+// It verifies ownership (managed-by label + source-reference annotation) before
+// deleting anything to avoid destroying unrelated resources that happen to share
+// the source's name. Per-namespace failures are aggregated so callers can defer
+// finalizer removal until cleanup actually succeeds.
 func (r *SourceReconciler) deleteAllMirrors(ctx context.Context, sourceObj metav1.Object) error {
 	logger := log.FromContext(ctx)
 
-	// List all namespaces
 	allNamespaces, err := r.NamespaceLister.ListNamespaces(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list namespaces: %w", err)
 	}
 
-	// Get GVK from source object
 	sourceUnstructured, ok := sourceObj.(*unstructured.Unstructured)
 	if !ok {
 		return fmt.Errorf("source object is not unstructured")
 	}
 
-	var deleteCount int
+	var (
+		deleteCount int
+		deleteErrs  []error
+	)
 	for _, ns := range allNamespaces {
-		// Skip source namespace
 		if ns == sourceObj.GetNamespace() {
 			continue
 		}
 
-		// Create mirror reference for deletion
-		mirror := &unstructured.Unstructured{}
-		mirror.SetGroupVersionKind(sourceUnstructured.GroupVersionKind())
-		mirror.SetNamespace(ns)
-		mirror.SetName(sourceObj.GetName())
-
-		err := r.Delete(ctx, mirror)
-		if err == nil {
-			deleteCount++
-		} else if !errors.IsNotFound(err) {
-			logger.Error(err, "failed to delete mirror", "namespace", ns)
+		existing := &unstructured.Unstructured{}
+		existing.SetGroupVersionKind(sourceUnstructured.GroupVersionKind())
+		getErr := r.Get(ctx, client.ObjectKey{Namespace: ns, Name: sourceObj.GetName()}, existing)
+		if errors.IsNotFound(getErr) {
+			continue
 		}
+		if getErr != nil {
+			logger.Error(getErr, "failed to fetch potential mirror", "namespace", ns)
+			deleteErrs = append(deleteErrs, fmt.Errorf("get mirror %s/%s: %w", ns, sourceObj.GetName(), getErr))
+			continue
+		}
+
+		if !IsManagedByUs(existing) {
+			continue
+		}
+		srcNs, srcName, _, found := GetSourceReference(existing)
+		if !found || srcNs != sourceObj.GetNamespace() || srcName != sourceObj.GetName() {
+			continue
+		}
+
+		if delErr := r.Delete(ctx, existing); delErr != nil && !errors.IsNotFound(delErr) {
+			logger.Error(delErr, "failed to delete mirror", "namespace", ns)
+			deleteErrs = append(deleteErrs, fmt.Errorf("delete mirror %s/%s: %w", ns, sourceObj.GetName(), delErr))
+			continue
+		}
+		deleteCount++
 	}
 
-	logger.Info("deleted mirrors", "count", deleteCount)
+	logger.Info("deleted mirrors", "count", deleteCount, "errors", len(deleteErrs))
+	if len(deleteErrs) > 0 {
+		return stderrors.Join(deleteErrs...)
+	}
 	return nil
 }
 
@@ -601,6 +639,19 @@ func (r *SourceReconciler) updateLastSyncStatus(ctx context.Context, source runt
 	sourceObj.SetAnnotations(annotations)
 	// source (*unstructured.Unstructured) already implements client.Object
 	return r.Update(ctx, source.(*unstructured.Unstructured))
+}
+
+// isBlacklistedSecret reports whether the given source is a core/v1 Secret with
+// a Type that must never be mirrored across namespaces.
+func isBlacklistedSecret(obj *unstructured.Unstructured) bool {
+	if obj.GetKind() != "Secret" || obj.GetAPIVersion() != "v1" {
+		return false
+	}
+	secretType, found, err := unstructured.NestedString(obj.Object, "type")
+	if err != nil || !found {
+		return false
+	}
+	return slices.Contains(constants.BlacklistedSecretTypes, secretType)
 }
 
 // isEnabledForMirroring checks if a resource has both the label and annotation for mirroring.

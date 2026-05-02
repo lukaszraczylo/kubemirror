@@ -879,3 +879,227 @@ func TestSourceReconciler_Reconcile_AnnotationChange_PatternChange(t *testing.T)
 	mockClient.AssertExpectations(t)
 	mockLister.AssertExpectations(t)
 }
+func TestSourceReconciler_deleteAllMirrors_skipsUnmanagedResources(t *testing.T) {
+	// Regression test: deleteAllMirrors must NOT delete a resource it does not own,
+	// even if the name and GVK happen to match the source.
+	sourceObj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]interface{}{
+				"name":      "shared-name",
+				"namespace": "default",
+				"uid":       "source-uid",
+			},
+		},
+	}
+
+	mockClient := new(MockClient)
+	mockLister := new(MockNamespaceLister)
+	mockLister.On("ListNamespaces", mock.Anything).Return([]string{"default", "ns-other"}, nil)
+
+	// In ns-other a resource with the same name/GVK exists but is NOT managed
+	// by kubemirror — pretend it's a regular Secret created by another operator.
+	otherSecret := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]interface{}{
+				"name":      "shared-name",
+				"namespace": "ns-other",
+			},
+		},
+	}
+	mockClient.On("Get", mock.Anything,
+		types.NamespacedName{Namespace: "ns-other", Name: "shared-name"},
+		mock.AnythingOfType("*unstructured.Unstructured")).
+		Return(nil, otherSecret)
+
+	r := &SourceReconciler{Client: mockClient, NamespaceLister: mockLister}
+
+	err := r.deleteAllMirrors(context.Background(), sourceObj)
+	require.NoError(t, err)
+
+	// The critical assertion: Delete was NEVER called.
+	mockClient.AssertNotCalled(t, "Delete", mock.Anything, mock.Anything, mock.Anything)
+	mockLister.AssertExpectations(t)
+}
+
+func TestSourceReconciler_deleteAllMirrors_aggregatesErrors(t *testing.T) {
+	// Regression test: per-namespace deletion failures must be returned (joined),
+	// otherwise callers will remove the finalizer and orphan the failed mirrors.
+	sourceObj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]interface{}{
+				"name":      "test-secret",
+				"namespace": "default",
+				"uid":       "source-uid",
+			},
+		},
+	}
+
+	managedMirror := func(ns string) *unstructured.Unstructured {
+		return &unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "Secret",
+				"metadata": map[string]interface{}{
+					"name":      "test-secret",
+					"namespace": ns,
+					"labels": map[string]interface{}{
+						constants.LabelManagedBy: constants.ControllerName,
+						constants.LabelMirror:    "true",
+					},
+					"annotations": map[string]interface{}{
+						constants.AnnotationSourceNamespace: "default",
+						constants.AnnotationSourceName:      "test-secret",
+						constants.AnnotationSourceUID:       "source-uid",
+					},
+				},
+			},
+		}
+	}
+
+	mockClient := new(MockClient)
+	mockLister := new(MockNamespaceLister)
+	mockLister.On("ListNamespaces", mock.Anything).Return([]string{"default", "ns-ok", "ns-fail"}, nil)
+
+	mockClient.On("Get", mock.Anything,
+		types.NamespacedName{Namespace: "ns-ok", Name: "test-secret"},
+		mock.AnythingOfType("*unstructured.Unstructured")).
+		Return(nil, managedMirror("ns-ok"))
+	mockClient.On("Get", mock.Anything,
+		types.NamespacedName{Namespace: "ns-fail", Name: "test-secret"},
+		mock.AnythingOfType("*unstructured.Unstructured")).
+		Return(nil, managedMirror("ns-fail"))
+
+	mockClient.On("Delete", mock.Anything, mock.MatchedBy(func(obj client.Object) bool {
+		u, ok := obj.(*unstructured.Unstructured)
+		return ok && u.GetNamespace() == "ns-ok"
+	}), mock.Anything).Return(nil)
+
+	mockClient.On("Delete", mock.Anything, mock.MatchedBy(func(obj client.Object) bool {
+		u, ok := obj.(*unstructured.Unstructured)
+		return ok && u.GetNamespace() == "ns-fail"
+	}), mock.Anything).Return(fmt.Errorf("webhook denied"))
+
+	r := &SourceReconciler{Client: mockClient, NamespaceLister: mockLister}
+	err := r.deleteAllMirrors(context.Background(), sourceObj)
+	require.Error(t, err, "must surface deletion failure so finalizer is retained")
+	assert.Contains(t, err.Error(), "ns-fail")
+}
+
+func TestIsBlacklistedSecret(t *testing.T) {
+	cases := []struct {
+		obj      *unstructured.Unstructured
+		name     string
+		expected bool
+	}{
+		{
+			name: "service-account-token blacklisted",
+			obj: &unstructured.Unstructured{Object: map[string]interface{}{
+				"apiVersion": "v1", "kind": "Secret",
+				"type": "kubernetes.io/service-account-token",
+			}},
+			expected: true,
+		},
+		{
+			name: "bootstrap token blacklisted",
+			obj: &unstructured.Unstructured{Object: map[string]interface{}{
+				"apiVersion": "v1", "kind": "Secret",
+				"type": "bootstrap.kubernetes.io/token",
+			}},
+			expected: true,
+		},
+		{
+			name: "helm release blacklisted",
+			obj: &unstructured.Unstructured{Object: map[string]interface{}{
+				"apiVersion": "v1", "kind": "Secret",
+				"type": "helm.sh/release.v1",
+			}},
+			expected: true,
+		},
+		{
+			name: "opaque secret allowed",
+			obj: &unstructured.Unstructured{Object: map[string]interface{}{
+				"apiVersion": "v1", "kind": "Secret",
+				"type": "Opaque",
+			}},
+			expected: false,
+		},
+		{
+			name: "secret without type allowed",
+			obj: &unstructured.Unstructured{Object: map[string]interface{}{
+				"apiVersion": "v1", "kind": "Secret",
+			}},
+			expected: false,
+		},
+		{
+			name: "configmap with matching type ignored",
+			obj: &unstructured.Unstructured{Object: map[string]interface{}{
+				"apiVersion": "v1", "kind": "ConfigMap",
+				"type": "kubernetes.io/service-account-token",
+			}},
+			expected: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.expected, isBlacklistedSecret(tc.obj))
+		})
+	}
+}
+
+func TestSourceReconciler_Reconcile_RefusesBlacklistedSecret(t *testing.T) {
+	// Regression test: enabling mirroring on a service-account-token Secret
+	// must NOT cause it to be mirrored anywhere.
+	mockClient := new(MockClient)
+	mockLister := new(MockNamespaceLister)
+
+	tokenSecret := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]interface{}{
+				"name":      "sa-token",
+				"namespace": "default",
+				"labels": map[string]interface{}{
+					constants.LabelEnabled: "true",
+				},
+				"annotations": map[string]interface{}{
+					constants.AnnotationSync:             "true",
+					constants.AnnotationTargetNamespaces: "all",
+				},
+			},
+			"type": "kubernetes.io/service-account-token",
+		},
+	}
+
+	mockClient.On("Get", mock.Anything,
+		types.NamespacedName{Namespace: "default", Name: "sa-token"},
+		mock.AnythingOfType("*unstructured.Unstructured")).
+		Return(nil, tokenSecret)
+
+	r := &SourceReconciler{
+		Client:          mockClient,
+		Scheme:          runtime.NewScheme(),
+		Config:          &config.Config{},
+		Filter:          filter.NewNamespaceFilter([]string{}, []string{}),
+		NamespaceLister: mockLister,
+		GVK:             schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"},
+	}
+
+	result, err := r.Reconcile(context.Background(),
+		ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "sa-token"}})
+
+	require.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result)
+
+	// Critical: no namespace listing, no Create, no Update — the Secret was
+	// rejected before anything mirroring-related happened.
+	mockLister.AssertNotCalled(t, "ListNamespacesWithLabels", mock.Anything)
+	mockClient.AssertNotCalled(t, "Create", mock.Anything, mock.Anything, mock.Anything)
+}
