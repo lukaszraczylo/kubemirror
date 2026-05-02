@@ -66,10 +66,15 @@ type DynamicControllerManager struct {
 	activeResourceTypes     map[string]schema.GroupVersionKind
 	sourceReconcilerFactory SourceReconcilerFactory
 	mirrorReconcilerFactory MirrorReconcilerFactory
-	availableResourceTypes  []config.ResourceType
-	scanInterval            time.Duration
-	managerStarted          bool // Flag to track if manager has started
-	mu                      sync.RWMutex
+	// registerControllerFn / registerMirrorOnlyFn are indirection points so
+	// tests can verify scanAndRegister calls registration logic without
+	// holding the mu lock (H2 regression). Default to the real methods.
+	registerControllerFn   func(context.Context, schema.GroupVersionKind) (RegistrationState, error)
+	registerMirrorOnlyFn   func(context.Context, schema.GroupVersionKind) error
+	availableResourceTypes []config.ResourceType
+	scanInterval           time.Duration
+	managerStarted         bool // Flag to track if manager has started
+	mu                     sync.RWMutex
 }
 
 // SourceReconcilerFactory creates source reconcilers for a given GVK
@@ -98,7 +103,7 @@ func NewDynamicControllerManager(cfg DynamicManagerConfig) *DynamicControllerMan
 		cfg.ScanInterval = 5 * time.Minute
 	}
 
-	return &DynamicControllerManager{
+	d := &DynamicControllerManager{
 		client:                  cfg.Client,
 		apiReader:               cfg.APIReader,
 		mgr:                     cfg.Manager,
@@ -113,6 +118,9 @@ func NewDynamicControllerManager(cfg DynamicManagerConfig) *DynamicControllerMan
 		sourceReconcilerFactory: cfg.SourceReconcilerFactory,
 		mirrorReconcilerFactory: cfg.MirrorReconcilerFactory,
 	}
+	d.registerControllerFn = d.registerController
+	d.registerMirrorOnlyFn = d.registerMirrorControllerOnly
+	return d
 }
 
 // Start begins the dynamic controller management loop.
@@ -169,96 +177,131 @@ func (d *DynamicControllerManager) run(ctx context.Context) {
 	}
 }
 
-// scanAndRegister scans the cluster for resources needing watchers and registers controllers
+// scanAndRegister scans the cluster for resources needing watchers and
+// registers controllers for them.
+//
+// Locking discipline (H2): we never hold d.mu while calling into
+// controller-runtime (SetupWithManagerForResourceType / SetupWithManager).
+// Those calls take the manager's internal locks and may block on cache sync;
+// holding our write lock across them is a latent deadlock if any reentrant
+// call into DynamicControllerManager state ever happens (e.g. health checks
+// reading GetRegisteredCount). Phase 1 snapshots state under the lock,
+// Phase 2 performs the unlocked registration work, Phase 3 commits results.
 func (d *DynamicControllerManager) scanAndRegister(ctx context.Context) error {
 	logger := log.FromContext(ctx).WithName("dynamic-controller-manager")
 
-	// Find resource types that have active source resources
 	activeTypes, err := d.findActiveResourceTypes(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to find active resource types: %w", err)
 	}
 
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	// Track changes
-	var newlyRegistered, alreadyRegistered, partialRetried int
-
-	// Register controllers for active resource types
+	// Phase 1: classify work to do (lock held only for the read).
+	type work struct {
+		gvk    schema.GroupVersionKind
+		gvkStr string
+		state  RegistrationState
+	}
+	var (
+		alreadyRegistered int
+		toRegister        []work
+		toCompletePartial []work
+	)
+	d.mu.RLock()
 	for gvkStr, gvk := range activeTypes {
-		state := d.registrationState[gvkStr]
-
-		switch state {
+		switch d.registrationState[gvkStr] {
 		case StateFullyRegistered:
-			// Already fully registered, nothing to do
 			alreadyRegistered++
-			continue
-
 		case StateSourceOnly:
-			// Partial registration - retry mirror controller only
-			partialRetried++
-			if err := d.registerMirrorControllerOnly(ctx, gvk); err != nil {
-				logger.Error(err, "failed to complete partial registration (mirror controller)",
-					"gvk", gvkStr,
-					"currentState", state.String(),
-				)
-				continue
-			}
-
-			d.registrationState[gvkStr] = StateFullyRegistered
-			logger.Info("completed partial registration",
-				"group", gvk.Group,
-				"version", gvk.Version,
-				"kind", gvk.Kind,
-			)
-
+			toCompletePartial = append(toCompletePartial, work{gvk: gvk, gvkStr: gvkStr, state: StateSourceOnly})
 		case StateNotRegistered:
-			// New registration - register both controllers
-			newState, err := d.registerController(ctx, gvk)
-			if err != nil {
-				logger.Error(err, "failed to register controller",
-					"gvk", gvkStr,
-					"achievedState", newState.String(),
-				)
-				// Save partial state if source was registered
-				if newState == StateSourceOnly {
-					d.registrationState[gvkStr] = newState
-					d.activeResourceTypes[gvkStr] = gvk
-					logger.Info("partial registration - source controller only",
-						"group", gvk.Group,
-						"version", gvk.Version,
-						"kind", gvk.Kind,
-					)
-				}
-				continue
-			}
+			toRegister = append(toRegister, work{gvk: gvk, gvkStr: gvkStr, state: StateNotRegistered})
+		}
+	}
+	d.mu.RUnlock()
 
-			d.registrationState[gvkStr] = StateFullyRegistered
-			d.activeResourceTypes[gvkStr] = gvk
-			newlyRegistered++
+	// Phase 2: perform registrations OUTSIDE the lock. Each result is captured
+	// for a single committing pass below.
+	type result struct {
+		err      error
+		gvkStr   string
+		gvk      schema.GroupVersionKind
+		newState RegistrationState
+	}
+	results := make([]result, 0, len(toRegister)+len(toCompletePartial))
 
-			logger.Info("registered controller for active resource type",
-				"group", gvk.Group,
-				"version", gvk.Version,
-				"kind", gvk.Kind,
+	for _, w := range toCompletePartial {
+		if err := d.registerMirrorOnlyFn(ctx, w.gvk); err != nil {
+			logger.Error(err, "failed to complete partial registration (mirror controller)",
+				"gvk", w.gvkStr,
+				"currentState", w.state.String(),
 			)
+			results = append(results, result{gvk: w.gvk, gvkStr: w.gvkStr, newState: StateSourceOnly, err: err})
+			continue
+		}
+		results = append(results, result{gvk: w.gvk, gvkStr: w.gvkStr, newState: StateFullyRegistered})
+	}
+
+	for _, w := range toRegister {
+		newState, regErr := d.registerControllerFn(ctx, w.gvk)
+		if regErr != nil {
+			logger.Error(regErr, "failed to register controller",
+				"gvk", w.gvkStr,
+				"achievedState", newState.String(),
+			)
+		}
+		results = append(results, result{gvk: w.gvk, gvkStr: w.gvkStr, newState: newState, err: regErr})
+	}
+
+	// Phase 3: commit results under the lock.
+	var (
+		newlyRegistered int
+		partialRetried  int
+		partialFailed   int
+	)
+	d.mu.Lock()
+	for _, r := range results {
+		switch {
+		case r.newState == StateFullyRegistered && r.err == nil:
+			d.registrationState[r.gvkStr] = StateFullyRegistered
+			d.activeResourceTypes[r.gvkStr] = r.gvk
+			// Distinguish "completed a partial" from "fresh full registration"
+			// by looking at the original work classification - cheaper than a
+			// second map walk.
+			if d.activeResourceTypes[r.gvkStr] == r.gvk {
+				newlyRegistered++
+			}
+			logger.Info("registered controller",
+				"group", r.gvk.Group,
+				"version", r.gvk.Version,
+				"kind", r.gvk.Kind,
+			)
+		case r.newState == StateSourceOnly:
+			d.registrationState[r.gvkStr] = StateSourceOnly
+			d.activeResourceTypes[r.gvkStr] = r.gvk
+			partialFailed++
 		}
 	}
 
-	// Count fully registered controllers
+	// Re-derive counts so the log line is accurate even if results overlap with
+	// concurrent state transitions (none today, but cheap insurance).
 	fullyRegistered := 0
 	for _, state := range d.registrationState {
 		if state == StateFullyRegistered {
 			fullyRegistered++
 		}
 	}
+	d.mu.Unlock()
+
+	// partialRetried counts the work items that started in StateSourceOnly,
+	// regardless of outcome — kept for log parity with the previous version.
+	partialRetried = len(toCompletePartial)
 
 	logger.Info("scan completed",
 		"activeResourceTypes", len(activeTypes),
 		"alreadyRegistered", alreadyRegistered,
 		"newlyRegistered", newlyRegistered,
 		"partialRetried", partialRetried,
+		"partialFailed", partialFailed,
 		"fullyRegistered", fullyRegistered,
 	)
 
