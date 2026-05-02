@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -20,13 +19,6 @@ import (
 	"github.com/lukaszraczylo/kubemirror/pkg/config"
 	"github.com/lukaszraczylo/kubemirror/pkg/constants"
 	"github.com/lukaszraczylo/kubemirror/pkg/filter"
-)
-
-const (
-	// cacheSettleDelay is the time to wait after namespace label changes
-	// to allow informer caches to sync. This addresses the race condition
-	// where namespace watch events fire before the cache is updated.
-	cacheSettleDelay = 3 * time.Second
 )
 
 // NamespaceReconciler watches for namespace CREATE and UPDATE events
@@ -88,11 +80,15 @@ func (r *NamespaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, fmt.Errorf("failed to reconcile %d source resources", totalErrors)
 	}
 
-	// Requeue with delay to catch any updates missed due to cache staleness.
-	// This is particularly important for namespace label changes where the
-	// informer cache may not yet reflect the new label state. The delay allows
-	// the cache to settle and ensures all relevant source resources are reconciled.
-	return ctrl.Result{RequeueAfter: cacheSettleDelay}, nil
+	// Don't requeue. The previous unconditional RequeueAfter caused every
+	// namespace in the cluster to re-reconcile every 3 seconds forever,
+	// generating constant API-server pressure scaled by namespace count.
+	// Cache-staleness windows after label changes are handled by:
+	//  - the manager's resync period (default 10m), which re-fires events,
+	//  - source freshness verification (--verify-source-freshness, default on)
+	//    in the SourceReconciler path,
+	//  - and the next genuine namespace event.
+	return ctrl.Result{}, nil
 }
 
 // reconcileResourceType finds and reconciles all sources of a specific resource type

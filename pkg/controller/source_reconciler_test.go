@@ -1103,3 +1103,55 @@ func TestSourceReconciler_Reconcile_RefusesBlacklistedSecret(t *testing.T) {
 	mockLister.AssertNotCalled(t, "ListNamespacesWithLabels", mock.Anything)
 	mockClient.AssertNotCalled(t, "Create", mock.Anything, mock.Anything, mock.Anything)
 }
+func TestSourceReconciler_updateLastSyncStatus_skipsWhenUnchanged(t *testing.T) {
+	// Regression test: re-running with the same reconciled/error counts must
+	// NOT issue an Update call — otherwise every successful reconcile bumps
+	// resourceVersion, fires a watch event, and re-enters Reconcile in a loop.
+	mockClient := new(MockClient)
+
+	source := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]interface{}{
+				"name":      "test",
+				"namespace": "default",
+				"annotations": map[string]interface{}{
+					constants.AnnotationSyncStatus: "reconciled:3,errors:0",
+				},
+			},
+		},
+	}
+
+	r := &SourceReconciler{Client: mockClient}
+	err := r.updateLastSyncStatus(context.Background(), source, source, 3, 0)
+	require.NoError(t, err)
+
+	mockClient.AssertNotCalled(t, "Update", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestSourceReconciler_updateLastSyncStatus_writesWhenChanged(t *testing.T) {
+	mockClient := new(MockClient)
+	mockClient.On("Update", mock.Anything, mock.AnythingOfType("*unstructured.Unstructured"), mock.Anything).Return(nil)
+
+	source := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]interface{}{
+				"name":      "test",
+				"namespace": "default",
+				"annotations": map[string]interface{}{
+					constants.AnnotationSyncStatus: "reconciled:2,errors:0",
+				},
+			},
+		},
+	}
+
+	r := &SourceReconciler{Client: mockClient}
+	err := r.updateLastSyncStatus(context.Background(), source, source, 3, 0)
+	require.NoError(t, err)
+
+	assert.Equal(t, "reconciled:3,errors:0", source.GetAnnotations()[constants.AnnotationSyncStatus])
+	mockClient.AssertCalled(t, "Update", mock.Anything, mock.Anything, mock.Anything)
+}

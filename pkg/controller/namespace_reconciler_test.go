@@ -203,8 +203,13 @@ func TestNamespaceReconciler_CleanupWhenNamespaceNoLongerTarget(t *testing.T) {
 					Name: tt.namespace.Name,
 				},
 			}
-			_, err := reconciler.Reconcile(ctx, req)
+			result, err := reconciler.Reconcile(ctx, req)
 			require.NoError(t, err)
+			// Regression: never schedule an unconditional re-reconcile. The
+			// previous implementation returned RequeueAfter=3s for every
+			// namespace event, which scaled to one re-reconcile per namespace
+			// every 3 seconds forever.
+			assert.Zero(t, result.RequeueAfter, "happy-path Reconcile must not schedule a periodic requeue")
 
 			// Verify mirrors were deleted as expected
 			for _, mirrorName := range tt.expectedDeleted {

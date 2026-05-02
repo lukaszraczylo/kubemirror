@@ -627,16 +627,24 @@ func (r *SourceReconciler) resolveTargetNamespaces(ctx context.Context, sourceOb
 	return targetNamespaces, nil
 }
 
-// updateLastSyncStatus updates the source resource's annotations with sync status.
+// updateLastSyncStatus updates the source resource's sync-status annotation.
+// Skips the Update call entirely if the value is unchanged; otherwise the
+// resulting watch event re-fires Reconcile and the controller spins on its
+// own writes. This is a no-op for steady-state convergence.
 func (r *SourceReconciler) updateLastSyncStatus(ctx context.Context, source runtime.Object, sourceObj metav1.Object, reconciledCount, errorCount int) error {
+	desired := fmt.Sprintf("reconciled:%d,errors:%d", reconciledCount, errorCount)
+
 	annotations := sourceObj.GetAnnotations()
+	if annotations[constants.AnnotationSyncStatus] == desired {
+		return nil
+	}
+
 	if annotations == nil {
 		annotations = make(map[string]string)
 	}
-
-	annotations[constants.AnnotationSyncStatus] = fmt.Sprintf("reconciled:%d,errors:%d", reconciledCount, errorCount)
-
+	annotations[constants.AnnotationSyncStatus] = desired
 	sourceObj.SetAnnotations(annotations)
+
 	// source (*unstructured.Unstructured) already implements client.Object
 	return r.Update(ctx, source.(*unstructured.Unstructured))
 }
