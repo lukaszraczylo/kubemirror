@@ -222,14 +222,19 @@ func ResolveTargetNamespaces(
 		default:
 			// Check if it's a pattern or direct namespace name
 			if strings.Contains(pattern, "*") || strings.Contains(pattern, "?") {
-				// It's a glob pattern - match against all namespaces
+				// It's a glob pattern - match against all namespaces. Honor
+				// opt-out namespaces (allow-mirrors=false) the same way the
+				// "all" case does — otherwise an opt-out namespace can still
+				// receive a mirror via a glob like "app-*".
 				for _, ns := range allNamespaces {
-					if matchesPattern(ns, pattern) && ns != sourceNamespace && filter.IsAllowed(ns) {
+					if matchesPattern(ns, pattern) && ns != sourceNamespace && filter.IsAllowed(ns) && !optOutMap[ns] {
 						targetMap[ns] = true
 					}
 				}
 			} else {
-				// Direct namespace name
+				// Direct namespace name. Explicit listing is treated as
+				// intentional opt-in by the source author and bypasses the
+				// opt-out guard (matches prior behavior).
 				if pattern != sourceNamespace && filter.IsAllowed(pattern) {
 					targetMap[pattern] = true
 				}

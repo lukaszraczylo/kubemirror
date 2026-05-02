@@ -376,6 +376,23 @@ func TestResolveTargetNamespaces_EdgeCases(t *testing.T) {
 		// Only "specific-ns" would be allowed, but it's not in allNamespaces
 		assert.Empty(t, got)
 	})
+
+	t.Run("glob pattern honors opt-out namespaces", func(t *testing.T) {
+		// Regression: a namespace with allow-mirrors=false used to receive a
+		// mirror via a glob like "app-*" because the glob branch ignored the
+		// opt-out list (only the "all" branch checked it).
+		got := ResolveTargetNamespaces(
+			[]string{"app-*"},
+			[]string{"app-1", "app-2", "app-optout"},
+			[]string{},
+			[]string{"app-optout"},
+			"default",
+			NewNamespaceFilter([]string{}, []string{}),
+		)
+		assert.Contains(t, got, "app-1")
+		assert.Contains(t, got, "app-2")
+		assert.NotContains(t, got, "app-optout", "opt-out namespace must not receive mirrors via glob match")
+	})
 }
 
 // Benchmark tests for critical paths
