@@ -10,12 +10,14 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
+	"github.com/lukaszraczylo/kubemirror/pkg/circuitbreaker"
 	"github.com/lukaszraczylo/kubemirror/pkg/config"
 	"github.com/lukaszraczylo/kubemirror/pkg/constants"
 	"github.com/lukaszraczylo/kubemirror/pkg/filter"
@@ -30,6 +32,7 @@ type NamespaceReconciler struct {
 	Scheme          *runtime.Scheme
 	Config          *config.Config
 	Filter          *filter.NamespaceFilter
+	CircuitBreaker  *circuitbreaker.CircuitBreaker
 	ResourceTypes   []config.ResourceType
 }
 
@@ -281,21 +284,30 @@ func (r *NamespaceReconciler) resolveTargetNamespaces(ctx context.Context, sourc
 	return targetNamespaces, nil
 }
 
-// reconcileMirror creates or updates a mirror in the target namespace.
-// This calls the mirror creation logic from the SourceReconciler.
+// reconcileMirror creates or updates a mirror in the target namespace by
+// delegating to SourceReconciler.reconcileMirror so all freshness, ownership,
+// and circuit-breaker behavior stays in one place.
 func (r *NamespaceReconciler) reconcileMirror(ctx context.Context, source *unstructured.Unstructured, targetNamespace string) error {
-	// Create a temporary SourceReconciler to use its mirror creation logic
-	// This avoids code duplication
-	sourceReconciler := &SourceReconciler{
+	return r.newSourceReconciler(source.GroupVersionKind()).
+		reconcileMirror(ctx, source, source, targetNamespace)
+}
+
+// newSourceReconciler builds an ad-hoc SourceReconciler for delegating mirror
+// reconciliation. APIReader and CircuitBreaker are forwarded so namespace-driven
+// mirror creates/updates use the same freshness checks and failure throttling
+// as direct source reconciles. Without this, namespace label changes would
+// silently bypass --verify-source-freshness and the per-resource circuit breaker.
+func (r *NamespaceReconciler) newSourceReconciler(gvk schema.GroupVersionKind) *SourceReconciler {
+	return &SourceReconciler{
 		Client:          r.Client,
 		Scheme:          r.Scheme,
 		Config:          r.Config,
 		Filter:          r.Filter,
 		NamespaceLister: r.NamespaceLister,
-		GVK:             source.GroupVersionKind(),
+		GVK:             gvk,
+		APIReader:       r.APIReader,
+		CircuitBreaker:  r.CircuitBreaker,
 	}
-
-	return sourceReconciler.reconcileMirror(ctx, source, source, targetNamespace)
 }
 
 // SetupWithManager sets up the controller with the Manager.

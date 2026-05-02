@@ -17,6 +17,7 @@ import (
 
 	ctrl "sigs.k8s.io/controller-runtime"
 
+	"github.com/lukaszraczylo/kubemirror/pkg/circuitbreaker"
 	"github.com/lukaszraczylo/kubemirror/pkg/config"
 	"github.com/lukaszraczylo/kubemirror/pkg/constants"
 	"github.com/lukaszraczylo/kubemirror/pkg/filter"
@@ -236,6 +237,40 @@ func TestNamespaceReconciler_CleanupWhenNamespaceNoLongerTarget(t *testing.T) {
 			}
 		})
 	}
+}
+func TestNamespaceReconciler_newSourceReconciler_forwardsAPIReaderAndCircuitBreaker(t *testing.T) {
+	// Regression test (H4): the SourceReconciler that NamespaceReconciler builds
+	// for delegated mirror reconciliation must carry the APIReader and the
+	// CircuitBreaker, otherwise namespace-driven mirror updates silently bypass
+	// --verify-source-freshness and the per-resource failure throttling.
+	apiReader := &stubAPIReader{}
+	cb := circuitbreaker.NewWithDefaults()
+
+	r := &NamespaceReconciler{
+		APIReader:      apiReader,
+		CircuitBreaker: cb,
+		Config:         &config.Config{},
+	}
+
+	gvk := schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"}
+	sr := r.newSourceReconciler(gvk)
+
+	require.NotNil(t, sr)
+	assert.Same(t, apiReader, sr.APIReader, "APIReader must be forwarded")
+	assert.Same(t, cb, sr.CircuitBreaker, "CircuitBreaker must be forwarded")
+	assert.Equal(t, gvk, sr.GVK)
+}
+
+// stubAPIReader is a minimal client.Reader for identity-comparison tests; it
+// is never invoked, so the methods only need to satisfy the interface.
+type stubAPIReader struct{}
+
+func (s *stubAPIReader) Get(_ context.Context, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
+	return nil
+}
+
+func (s *stubAPIReader) List(_ context.Context, _ client.ObjectList, _ ...client.ListOption) error {
+	return nil
 }
 
 // Helper functions

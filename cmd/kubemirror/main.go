@@ -429,6 +429,7 @@ func main() {
 		NamespaceLister: namespaceLister,
 		ResourceTypes:   cfg.MirroredResourceTypes,
 		APIReader:       mgr.GetAPIReader(), // Direct API reader for fresh namespace lookups
+		CircuitBreaker:  cb,                 // Forwarded into reconcileMirror so namespace-driven mirrors share failure throttling
 	}
 
 	if err = namespaceReconciler.SetupWithManager(mgr); err != nil {
