@@ -8,7 +8,6 @@ import (
 	"slices"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -141,9 +140,10 @@ func (r *SourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, err
 	}
 
+	// sourceObj is just an alias kept for readability when calling code that
+	// expects the metav1.Object interface; both names point at the same value.
 	sourceObj := source
 
-	// Check if this is a mirror resource (shouldn't reconcile mirrors as sources)
 	if IsMirrorResource(sourceObj) {
 		// Silently skip - mirrors reconcile via watch, not as sources
 		return ctrl.Result{}, nil
@@ -677,15 +677,6 @@ func isEnabledForMirroring(obj metav1.Object) bool {
 	}
 
 	return true
-}
-
-// SetupWithManager sets up the controller with the Manager.
-func (r *SourceReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// Build predicate to only watch resources with enabled label
-	// This reduces API server load by ~90%
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&corev1.Secret{}).
-		Complete(r)
 }
 
 // SetupWithManagerForResourceType sets up a controller for a specific resource type.
