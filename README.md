@@ -970,6 +970,19 @@ git push origin v0.2.0
 - [Helm Chart Documentation](charts/kubemirror/README.md) - Kubernetes deployment via Helm
 - [GitHub Repository](https://github.com/lukaszraczylo/kubemirror) - Source code and issue tracker
 
+## Telemetry
+
+On startup this controller sends a single anonymous adoption ping — project
+name, version, timestamp; no identifiers, no Kubernetes object data, no
+cluster metadata. Fire-and-forget with a 2-second timeout; cannot block
+startup or panic.
+
+See **[oss-telemetry — Disabling telemetry](https://github.com/lukaszraczylo/oss-telemetry#disabling-telemetry)**
+for the exact wire format, source, and full opt-out documentation.
+
+Quick opt-out: set any of `DO_NOT_TRACK=1`, `OSS_TELEMETRY_DISABLED=1`,
+or `KUBEMIRROR_DISABLE_TELEMETRY=1`.
+
 ## License
 
 See [LICENSE](LICENSE) file for details.
