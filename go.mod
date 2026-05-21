@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/go-logr/logr v1.4.3
+	github.com/lukaszraczylo/oss-telemetry v0.0.0-20260521005811-e02d51419c52
 	github.com/stretchr/testify v1.11.1
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.36.1

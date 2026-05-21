@@ -27,7 +27,13 @@ import (
 	"github.com/lukaszraczylo/kubemirror/pkg/controller"
 	"github.com/lukaszraczylo/kubemirror/pkg/discovery"
 	"github.com/lukaszraczylo/kubemirror/pkg/filter"
+	telemetry "github.com/lukaszraczylo/oss-telemetry"
 )
+
+// Version is the build version. Set via ldflags during build:
+//
+//	-X main.Version=v1.2.3
+var Version = "dev"
 
 var (
 	scheme   = runtime.NewScheme()
@@ -57,6 +63,8 @@ func makeCacheSyncChecker(c cache.Cache, ctx context.Context, logger logr.Logger
 }
 
 func main() {
+	telemetry.Send("kubemirror", Version)
+
 	var (
 		metricsAddr           string
 		probeAddr             string
