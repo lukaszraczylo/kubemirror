@@ -182,7 +182,7 @@ func TestCreateMirror_Unstructured_StripsOwnerReferences(t *testing.T) {
 					"externalsecrets.external-secrets.io/externalsecret-cleanup",
 				},
 			},
-			"data": map[string]interface{}{
+			"data": map[string]interface{}{ //nolint:gosec // base64 test fixture, not a real credential
 				"password": "c2VjcmV0",
 			},
 		},
@@ -387,7 +387,7 @@ func TestUpdateMirror_UnstructuredSecret(t *testing.T) {
 				},
 			},
 			"type": "Opaque",
-			"data": map[string]interface{}{
+			"data": map[string]interface{}{ //nolint:gosec // base64 test fixture, not a real credential
 				"password": "b2xkLXZhbHVl", // base64 encoded "old-value"
 			},
 		},
@@ -403,7 +403,7 @@ func TestUpdateMirror_UnstructuredSecret(t *testing.T) {
 				"generation": int64(10),
 			},
 			"type": "kubernetes.io/tls",
-			"data": map[string]interface{}{
+			"data": map[string]interface{}{ //nolint:gosec // base64 test fixture, not a real credential
 				"password": "bmV3LXZhbHVl", // base64 encoded "new-value"
 				"username": "YWRtaW4=",     // base64 encoded "admin"
 			},
@@ -670,10 +670,9 @@ func TestCreateMirror_NoSyncAnnotations(t *testing.T) {
 				constants.LabelEnabled: "true",
 			},
 			Annotations: map[string]string{
-				constants.AnnotationSync:                      "true",
-				constants.AnnotationTargetNamespaces:          "app1,app2",
-				constants.AnnotationExclude:                   "false",
-				constants.AnnotationRecreateOnImmutableChange: "true",
+				constants.AnnotationSync:             "true",
+				constants.AnnotationTargetNamespaces: "app1,app2",
+				constants.AnnotationExclude:          "false",
 			},
 		},
 		Data: map[string][]byte{"key": []byte("value")},

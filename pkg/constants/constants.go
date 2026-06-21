@@ -71,30 +71,17 @@ const (
 	// Annotation because: values can be complex patterns exceeding label limits.
 	AnnotationTargetNamespaces = Domain + "/target-namespaces"
 
-	// AnnotationExclude explicitly excludes a resource from mirroring when "true".
+	// AnnotationExclude opts a resource out of mirroring when "true", overriding
+	// the enabled label and sync annotation. Any mirrors it previously created are
+	// removed. Use AnnotationPaused instead to freeze mirrors without deleting them.
 	// Annotation because: used for configuration, not filtering.
 	AnnotationExclude = Domain + "/exclude"
 
-	// AnnotationMaxTargets overrides the default maximum target limit per resource.
-	// Annotation because: numeric configuration value.
-	AnnotationMaxTargets = Domain + "/max-targets"
-
-	// AnnotationRecreateOnImmutableChange controls delete/recreate behavior.
-	// When "true", kubemirror will delete and recreate mirrors on immutable field changes.
-	// Annotation because: configuration flag, not used for filtering.
-	AnnotationRecreateOnImmutableChange = Domain + "/recreate-on-immutable-change"
-
-	// AnnotationPaused on controller deployment pauses all reconciliation when "true".
+	// AnnotationPaused freezes a source's mirrors when "true": existing mirrors
+	// are left untouched (no updates, no orphan cleanup) until the annotation is
+	// removed. Unlike AnnotationExclude, pausing does not delete existing mirrors.
 	// Annotation because: operational control, not used for filtering.
 	AnnotationPaused = Domain + "/paused"
-
-	// --- Source Tracking Annotations ---
-	// These are set by kubemirror on source resources for change detection.
-
-	// AnnotationContentHash stores the SHA256 hash of the source resource content.
-	// Used for efficient change detection without deep comparison.
-	// Annotation because: computed value (64 chars), may exceed label limits.
-	AnnotationContentHash = Domain + "/content-hash"
 
 	// --- Mirror Ownership Annotations ---
 	// These are set by kubemirror on mirror resources to track their source.
@@ -128,19 +115,6 @@ const (
 
 	// AnnotationSyncStatus stores human-readable sync status ("3/5 synced", etc.).
 	AnnotationSyncStatus = Domain + "/sync-status"
-
-	// AnnotationFailedTargets stores comma-separated list of failed target namespaces.
-	AnnotationFailedTargets = Domain + "/failed-targets"
-
-	// AnnotationWebhookError stores webhook rejection error message for debugging.
-	AnnotationWebhookError = Domain + "/webhook-error"
-
-	// AnnotationTargetNamespaceUID tracks the UID of the target namespace.
-	// Used for detecting namespace recreation.
-	AnnotationTargetNamespaceUID = Domain + "/target-namespace-uid"
-
-	// AnnotationDeletionAttempts tracks number of failed deletion attempts.
-	AnnotationDeletionAttempts = Domain + "/deletion-attempts"
 
 	// --- Transformation Annotations ---
 	// These configure resource transformation during mirroring.
@@ -188,14 +162,5 @@ var (
 		"kubernetes.io/service-account-token",
 		"bootstrap.kubernetes.io/token",
 		"helm.sh/release.v1",
-	}
-
-	// Default Denied Resource Types
-	DefaultDeniedResourceTypes = []string{
-		"events",
-		"pods",
-		"replicasets",
-		"endpoints",
-		"endpointslices",
 	}
 )

@@ -7,7 +7,6 @@ import (
 	"slices"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -130,6 +129,13 @@ func (r *NamespaceReconciler) reconcileResourceType(ctx context.Context, rt conf
 			continue
 		}
 
+		// Skip excluded or paused sources. Excluded resources are torn down by the
+		// source reconciler; paused resources must stay frozen. In both cases the
+		// namespace reconciler must not create, update, or delete their mirrors.
+		if annotations[constants.AnnotationExclude] == "true" || isPaused(source) {
+			continue
+		}
+
 		// Resolve target namespaces for this source
 		targetNamespaces, err := r.resolveTargetNamespaces(ctx, source)
 		if err != nil {
@@ -160,38 +166,10 @@ func (r *NamespaceReconciler) reconcileResourceType(ctx context.Context, rt conf
 				"targetNamespace", namespaceName,
 				"resourceType", rt.String())
 		} else {
-			// Namespace is no longer a target - check if mirror exists and delete it
-			mirror := &unstructured.Unstructured{}
-			mirror.SetGroupVersionKind(source.GroupVersionKind())
-			mirror.SetNamespace(namespaceName)
-			mirror.SetName(source.GetName())
-
-			err := r.Get(ctx, client.ObjectKey{Namespace: namespaceName, Name: source.GetName()}, mirror)
-			if errors.IsNotFound(err) {
-				// No mirror exists, nothing to clean up
-				continue
-			}
+			// Namespace is no longer a target - delete the mirror if we own it.
+			outcome, err := deleteOwnedMirror(ctx, r.Client, source.GroupVersionKind(),
+				namespaceName, source.GetName(), source.GetNamespace(), source.GetName())
 			if err != nil {
-				logger.Error(err, "failed to check for mirror",
-					"source", source.GetName(),
-					"namespace", namespaceName)
-				errorCount++
-				continue
-			}
-
-			// Verify this is actually our mirror (not someone else's resource with the same name)
-			if !IsManagedByUs(mirror) {
-				continue
-			}
-
-			// Verify this mirror points to our source
-			srcNs, srcName, _, found := GetSourceReference(mirror)
-			if !found || srcNs != source.GetNamespace() || srcName != source.GetName() {
-				continue
-			}
-
-			// This mirror should be deleted (namespace no longer a valid target)
-			if err := r.Delete(ctx, mirror); err != nil {
 				logger.Error(err, "failed to delete orphaned mirror",
 					"source", source.GetName(),
 					"sourceNamespace", source.GetNamespace(),
@@ -199,89 +177,27 @@ func (r *NamespaceReconciler) reconcileResourceType(ctx context.Context, rt conf
 				errorCount++
 				continue
 			}
-
-			reconciledCount++
-			logger.V(1).Info("deleted orphaned mirror due to namespace label change",
-				"source", source.GetName(),
-				"sourceNamespace", source.GetNamespace(),
-				"targetNamespace", namespaceName,
-				"resourceType", rt.String())
+			if outcome == mirrorDeleted {
+				reconciledCount++
+				logger.V(1).Info("deleted orphaned mirror due to namespace label change",
+					"source", source.GetName(),
+					"sourceNamespace", source.GetNamespace(),
+					"targetNamespace", namespaceName,
+					"resourceType", rt.String())
+			}
 		}
 	}
 
 	return reconciledCount, errorCount, nil
 }
 
-// resolveTargetNamespaces determines which namespaces should receive mirrors for a source.
-// Uses the same logic as SourceReconciler.resolveTargetNamespaces.
+// resolveTargetNamespaces determines which namespaces should receive mirrors for
+// a source. It delegates to SourceReconciler so target-resolution logic
+// (pattern parsing/validation, namespace listing, max-targets clamping) lives in
+// exactly one place, mirroring the reconcileMirror delegation below.
 func (r *NamespaceReconciler) resolveTargetNamespaces(ctx context.Context, source *unstructured.Unstructured) ([]string, error) {
-	annotations := source.GetAnnotations()
-	if annotations == nil {
-		return nil, nil
-	}
-
-	targetNsAnnotation := annotations[constants.AnnotationTargetNamespaces]
-	if targetNsAnnotation == "" {
-		return nil, nil
-	}
-
-	// Parse patterns
-	patterns := filter.ParseTargetNamespaces(targetNsAnnotation)
-	if len(patterns) == 0 {
-		return nil, nil
-	}
-
-	// Validate patterns and log warnings for invalid ones
-	validationResults, allValid := filter.ValidatePatterns(patterns)
-	if !allValid {
-		logger := log.FromContext(ctx)
-		invalidPatterns := filter.InvalidPatterns(validationResults)
-		for _, invalid := range invalidPatterns {
-			logger.Info("invalid glob pattern in target-namespaces annotation, pattern will be skipped",
-				"pattern", invalid.Pattern,
-				"error", invalid.Error.Error(),
-				"source", source.GetName(),
-				"namespace", source.GetNamespace(),
-			)
-		}
-
-		// Filter to only valid patterns
-		var validPatterns []string
-		for _, result := range validationResults {
-			if result.Valid {
-				validPatterns = append(validPatterns, result.Pattern)
-			}
-		}
-		patterns = validPatterns
-
-		// If no valid patterns remain, return empty
-		if len(patterns) == 0 {
-			return nil, nil
-		}
-	}
-
-	// Get all namespace info in a single API call (more efficient than 3 separate calls)
-	nsInfo, err := r.NamespaceLister.ListNamespacesWithLabels(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list namespaces: %w", err)
-	}
-
-	// Resolve target namespaces using the pre-categorized namespace info
-	targetNamespaces := filter.ResolveTargetNamespaces(
-		patterns,
-		nsInfo.All,
-		nsInfo.AllowMirrors,
-		nsInfo.OptOut,
-		source.GetNamespace(),
-		r.Filter,
-	)
-
-	// Enforce max targets limit
-	if r.Config != nil && r.Config.MaxTargetsPerResource > 0 && len(targetNamespaces) > r.Config.MaxTargetsPerResource {
-		targetNamespaces = targetNamespaces[:r.Config.MaxTargetsPerResource]
-	}
-
-	return targetNamespaces, nil
+	return r.newSourceReconciler(source.GroupVersionKind()).
+		resolveTargetNamespaces(ctx, source)
 }
 
 // reconcileMirror creates or updates a mirror in the target namespace by

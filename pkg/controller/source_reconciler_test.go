@@ -205,12 +205,83 @@ func TestIsEnabledForMirroring(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			name: "excluded overrides enabled label and sync annotation",
+			obj: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						constants.LabelEnabled: "true",
+					},
+					Annotations: map[string]string{
+						constants.AnnotationSync:    "true",
+						constants.AnnotationExclude: "true",
+					},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "exclude set to false does not disable mirroring",
+			obj: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						constants.LabelEnabled: "true",
+					},
+					Annotations: map[string]string{
+						constants.AnnotationSync:    "true",
+						constants.AnnotationExclude: "false",
+					},
+				},
+			},
+			want: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := isEnabledForMirroring(tt.obj)
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestIsPaused(t *testing.T) {
+	tests := []struct {
+		obj  metav1.Object
+		name string
+		want bool
+	}{
+		{
+			name: "paused true",
+			obj: &corev1.Secret{ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{constants.AnnotationPaused: "true"},
+			}},
+			want: true,
+		},
+		{
+			name: "paused false",
+			obj: &corev1.Secret{ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{constants.AnnotationPaused: "false"},
+			}},
+			want: false,
+		},
+		{
+			name: "annotation absent",
+			obj: &corev1.Secret{ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{constants.AnnotationSync: "true"},
+			}},
+			want: false,
+		},
+		{
+			name: "no annotations",
+			obj:  &corev1.Secret{ObjectMeta: metav1.ObjectMeta{}},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isPaused(tt.obj))
 		})
 	}
 }
@@ -603,7 +674,7 @@ func TestSourceReconciler_Reconcile_AnnotationChange_AllToAllLabeled(t *testing.
 					constants.FinalizerName,
 				},
 			},
-			"data": map[string]interface{}{
+			"data": map[string]interface{}{ //nolint:gosec // base64 test fixture, not a real credential
 				"password": "c2VjcmV0",
 			},
 		},
@@ -632,7 +703,7 @@ func TestSourceReconciler_Reconcile_AnnotationChange_AllToAllLabeled(t *testing.
 						constants.AnnotationSourceUID:       "source-uid-123",
 					},
 				},
-				"data": map[string]interface{}{
+				"data": map[string]interface{}{ //nolint:gosec // base64 test fixture, not a real credential
 					"password": "c2VjcmV0",
 				},
 			},
@@ -733,6 +804,53 @@ func TestSourceReconciler_Reconcile_AnnotationChange_AllToAllLabeled(t *testing.
 
 	mockClient.AssertExpectations(t)
 	mockLister.AssertExpectations(t)
+}
+
+func TestSourceReconciler_Reconcile_Paused_LeavesMirrorsUntouched(t *testing.T) {
+	// A paused source must early-return: no List, Create, Delete, or Update.
+	// The MockClient panics on any un-mocked call, so wiring only the source Get
+	// proves Reconcile touches nothing else.
+	source := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]any{
+				"name":      "test-secret",
+				"namespace": "default",
+				"uid":       "source-uid-123",
+				"labels": map[string]any{
+					constants.LabelEnabled: "true",
+				},
+				"annotations": map[string]any{
+					constants.AnnotationSync:             "true",
+					constants.AnnotationTargetNamespaces: "all",
+					constants.AnnotationPaused:           "true",
+				},
+				"finalizers": []any{constants.FinalizerName},
+			},
+			"data": map[string]any{"password": "c2VjcmV0"}, //nolint:gosec // base64 test fixture, not a real credential
+		},
+	}
+
+	mockClient := new(MockClient)
+	// Only the source read is expected; nothing else.
+	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "default", Name: "test-secret"}, mock.Anything).
+		Return(nil, source).Once()
+
+	r := &SourceReconciler{
+		Client: mockClient,
+		Scheme: runtime.NewScheme(),
+		Config: &config.Config{},
+		Filter: filter.NewNamespaceFilter(nil, nil),
+		GVK:    schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"},
+	}
+
+	result, err := r.Reconcile(context.Background(),
+		ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "test-secret"}})
+
+	require.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result)
+	mockClient.AssertExpectations(t)
 }
 
 func TestSourceReconciler_Reconcile_AnnotationChange_PatternChange(t *testing.T) {

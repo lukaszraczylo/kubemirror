@@ -214,6 +214,15 @@ func (r *SourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, nil
 	}
 
+	// Respect a per-source pause: freeze existing mirrors in place. We skip all
+	// mirror create/update and orphan cleanup, leaving any prior mirrors and the
+	// finalizer untouched until the annotation is removed. Deletion and disabling
+	// are handled above and intentionally take precedence over pause.
+	if isPaused(sourceObj) {
+		logger.V(1).Info("source is paused, leaving existing mirrors unchanged")
+		return ctrl.Result{}, nil
+	}
+
 	// Add finalizer if not present
 	if !slices.Contains(sourceObj.GetFinalizers(), constants.FinalizerName) {
 		logger.Info("adding finalizer to source resource")
@@ -445,32 +454,16 @@ func (r *SourceReconciler) deleteAllMirrors(ctx context.Context, sourceObj metav
 			continue
 		}
 
-		existing := &unstructured.Unstructured{}
-		existing.SetGroupVersionKind(sourceUnstructured.GroupVersionKind())
-		getErr := r.Get(ctx, client.ObjectKey{Namespace: ns, Name: sourceObj.GetName()}, existing)
-		if errors.IsNotFound(getErr) {
-			continue
-		}
-		if getErr != nil {
-			logger.Error(getErr, "failed to fetch potential mirror", "namespace", ns)
-			deleteErrs = append(deleteErrs, fmt.Errorf("get mirror %s/%s: %w", ns, sourceObj.GetName(), getErr))
-			continue
-		}
-
-		if !IsManagedByUs(existing) {
-			continue
-		}
-		srcNs, srcName, _, found := GetSourceReference(existing)
-		if !found || srcNs != sourceObj.GetNamespace() || srcName != sourceObj.GetName() {
-			continue
-		}
-
-		if delErr := r.Delete(ctx, existing); delErr != nil && !errors.IsNotFound(delErr) {
+		outcome, delErr := deleteOwnedMirror(ctx, r.Client, sourceUnstructured.GroupVersionKind(),
+			ns, sourceObj.GetName(), sourceObj.GetNamespace(), sourceObj.GetName())
+		if delErr != nil {
 			logger.Error(delErr, "failed to delete mirror", "namespace", ns)
 			deleteErrs = append(deleteErrs, fmt.Errorf("delete mirror %s/%s: %w", ns, sourceObj.GetName(), delErr))
 			continue
 		}
-		deleteCount++
+		if outcome == mirrorDeleted {
+			deleteCount++
+		}
 	}
 
 	logger.Info("deleted mirrors", "count", deleteCount, "errors", len(deleteErrs))
@@ -516,41 +509,16 @@ func (r *SourceReconciler) cleanupOrphanedMirrors(ctx context.Context, sourceObj
 			continue
 		}
 
-		// Check if a mirror exists in this namespace
-		mirror := &unstructured.Unstructured{}
-		mirror.SetGroupVersionKind(sourceUnstructured.GroupVersionKind())
-		mirror.SetNamespace(ns)
-		mirror.SetName(sourceObj.GetName())
-
-		err := r.Get(ctx, client.ObjectKey{Namespace: ns, Name: sourceObj.GetName()}, mirror)
-		if errors.IsNotFound(err) {
-			// No mirror exists, nothing to clean up
-			continue
-		}
+		outcome, err := deleteOwnedMirror(ctx, r.Client, sourceUnstructured.GroupVersionKind(),
+			ns, sourceObj.GetName(), sourceObj.GetNamespace(), sourceObj.GetName())
 		if err != nil {
-			logger.Error(err, "failed to check for mirror", "namespace", ns)
-			continue
-		}
-
-		// Verify this is actually our mirror (not someone else's resource with the same name)
-		if !IsManagedByUs(mirror) {
-			continue
-		}
-
-		// Verify this mirror points to our source
-		srcNs, srcName, _, found := GetSourceReference(mirror)
-		if !found || srcNs != sourceObj.GetNamespace() || srcName != sourceObj.GetName() {
-			continue
-		}
-
-		// This is an orphaned mirror - delete it
-		if err := r.Delete(ctx, mirror); err != nil {
 			logger.Error(err, "failed to delete orphaned mirror", "namespace", ns)
 			continue
 		}
-
-		deletedCount++
-		logger.V(1).Info("deleted orphaned mirror", "namespace", ns)
+		if outcome == mirrorDeleted {
+			deletedCount++
+			logger.V(1).Info("deleted orphaned mirror", "namespace", ns)
+		}
 	}
 
 	return deletedCount, nil
@@ -662,7 +630,10 @@ func isBlacklistedSecret(obj *unstructured.Unstructured) bool {
 	return slices.Contains(constants.BlacklistedSecretTypes, secretType)
 }
 
-// isEnabledForMirroring checks if a resource has both the label and annotation for mirroring.
+// isEnabledForMirroring reports whether a resource should be mirrored. A resource
+// must carry both the enabled label and the sync annotation, and must not be
+// explicitly excluded. An excluded resource (exclude="true") is treated as
+// disabled, so the reconcile loop tears down any mirrors it previously created.
 func isEnabledForMirroring(obj metav1.Object) bool {
 	// Check label
 	labels := obj.GetLabels()
@@ -676,7 +647,21 @@ func isEnabledForMirroring(obj metav1.Object) bool {
 		return false
 	}
 
+	// Explicit opt-out always wins over the enable label/annotation.
+	if annotations[constants.AnnotationExclude] == "true" {
+		return false
+	}
+
 	return true
+}
+
+// isPaused reports whether a source has the pause annotation set. A paused
+// source is frozen: its existing mirrors are left exactly as they are (no
+// updates, no orphan cleanup) until the annotation is removed. Unlike
+// isEnabledForMirroring returning false, pausing does not delete mirrors.
+func isPaused(obj metav1.Object) bool {
+	annotations := obj.GetAnnotations()
+	return annotations != nil && annotations[constants.AnnotationPaused] == "true"
 }
 
 // SetupWithManagerForResourceType sets up a controller for a specific resource type.
@@ -689,10 +674,7 @@ func (r *SourceReconciler) SetupWithManagerForResourceType(
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(gvk)
 
-	// Create unique controller name including version and group to avoid collisions
-	// e.g., "HorizontalPodAutoscaler.v1.autoscaling" or "Secret.v1." (empty group for core resources)
-	// This matches the naming convention used by mirror reconcilers
-	controllerName := gvk.Kind + "." + gvk.Version + "." + gvk.Group
+	controllerName := gvkControllerName(gvk, false)
 
 	// Create mirror object for watching
 	mirrorObj := &unstructured.Unstructured{}
