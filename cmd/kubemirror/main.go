@@ -134,7 +134,7 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	setupLog.Info("starting kubemirror controller",
-		"version", "dev",
+		"version", Version,
 		"maxTargets", maxTargets,
 		"workers", workerThreads,
 	)
@@ -207,7 +207,7 @@ func main() {
 	// This can reduce memory consumption by 50-70% by removing:
 	// - managedFields (often several KB per resource)
 	// - large annotations like kubectl.kubernetes.io/last-applied-configuration
-	transformFunc := func(obj interface{}) (interface{}, error) {
+	transformFunc := func(obj any) (any, error) {
 		// Type assert to unstructured
 		u, ok := obj.(*unstructured.Unstructured)
 		if !ok {
