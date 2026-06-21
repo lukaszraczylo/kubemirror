@@ -25,9 +25,9 @@ spec:
 
         - alert: KubeMirrorHighReconcileErrors
           expr: |
-            rate(controller_runtime_reconcile_errors_total{controller="secret"}[5m]) > 0.1
+            rate(controller_runtime_reconcile_errors_total{controller=~"Secret.*"}[5m]) > 0.1
             or
-            rate(controller_runtime_reconcile_errors_total{controller="configmap"}[5m]) > 0.1
+            rate(controller_runtime_reconcile_errors_total{controller=~"ConfigMap.*"}[5m]) > 0.1
           for: 10m
           labels:
             severity: warning
@@ -39,7 +39,7 @@ spec:
         - alert: KubeMirrorReconcileLatencyHigh
           expr: |
             histogram_quantile(0.99,
-              rate(controller_runtime_reconcile_time_seconds_bucket{controller=~"secret|configmap"}[5m])
+              rate(controller_runtime_reconcile_time_seconds_bucket{controller=~"Secret.*|ConfigMap.*"}[5m])
             ) > 5
           for: 10m
           labels:
@@ -51,7 +51,7 @@ spec:
 
         - alert: KubeMirrorWorkqueueDepthHigh
           expr: |
-            workqueue_depth{name=~"secret|configmap"} > 100
+            workqueue_depth{name=~"Secret.*|ConfigMap.*"} > 100
           for: 15m
           labels:
             severity: warning
@@ -74,9 +74,9 @@ spec:
         # Resource mirror alerts
         - alert: KubeMirrorHighFailureRate
           expr: |
-            sum(rate(controller_runtime_reconcile_errors_total{controller=~"secret|configmap"}[5m]))
+            sum(rate(controller_runtime_reconcile_errors_total{controller=~"Secret.*|ConfigMap.*"}[5m]))
             /
-            sum(rate(controller_runtime_reconcile_total{controller=~"secret|configmap"}[5m]))
+            sum(rate(controller_runtime_reconcile_total{controller=~"Secret.*|ConfigMap.*"}[5m]))
             > 0.05
           for: 10m
           labels:
@@ -118,29 +118,29 @@ spec:
         - record: kubemirror:reconcile_duration_seconds:p99
           expr: |
             histogram_quantile(0.99,
-              rate(controller_runtime_reconcile_time_seconds_bucket{controller=~"secret|configmap"}[5m])
+              rate(controller_runtime_reconcile_time_seconds_bucket{controller=~"Secret.*|ConfigMap.*"}[5m])
             )
 
         - record: kubemirror:reconcile_duration_seconds:p95
           expr: |
             histogram_quantile(0.95,
-              rate(controller_runtime_reconcile_time_seconds_bucket{controller=~"secret|configmap"}[5m])
+              rate(controller_runtime_reconcile_time_seconds_bucket{controller=~"Secret.*|ConfigMap.*"}[5m])
             )
 
         - record: kubemirror:reconcile_duration_seconds:p50
           expr: |
             histogram_quantile(0.50,
-              rate(controller_runtime_reconcile_time_seconds_bucket{controller=~"secret|configmap"}[5m])
+              rate(controller_runtime_reconcile_time_seconds_bucket{controller=~"Secret.*|ConfigMap.*"}[5m])
             )
 
         - record: kubemirror:reconcile_rate:5m
           expr: |
-            sum(rate(controller_runtime_reconcile_total{controller=~"secret|configmap"}[5m])) by (controller, result)
+            sum(rate(controller_runtime_reconcile_total{controller=~"Secret.*|ConfigMap.*"}[5m])) by (controller, result)
 
         - record: kubemirror:reconcile_errors:rate5m
           expr: |
-            sum(rate(controller_runtime_reconcile_errors_total{controller=~"secret|configmap"}[5m])) by (controller)
+            sum(rate(controller_runtime_reconcile_errors_total{controller=~"Secret.*|ConfigMap.*"}[5m])) by (controller)
 
         - record: kubemirror:workqueue_depth:max
           expr: |
-            max(workqueue_depth{name=~"secret|configmap"}) by (name)
+            max(workqueue_depth{name=~"Secret.*|ConfigMap.*"}) by (name)

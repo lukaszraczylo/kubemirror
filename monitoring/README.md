@@ -159,8 +159,13 @@ histogram_quantile(0.99,
 )
 
 # Current workqueue depth
-workqueue_depth{name=~"secret|configmap"}
+workqueue_depth{name=~"Secret.*|ConfigMap.*"}
 ```
+
+> **Controller label values:** kubemirror names each controller `<Kind>.<version>.<group>`
+> (e.g. `Secret.v1.`, `ConfigMap.v1.`) plus a `-mirror` variant for orphan
+> detection, so PromQL filters use prefixes like `controller=~"Secret.*"` rather
+> than `controller="secret"`. Adjust the kind for other mirrored resource types.
 
 ### Using kubectl
 
