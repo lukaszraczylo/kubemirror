@@ -3,6 +3,7 @@ package controller
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -96,7 +97,7 @@ func filterKubeMirrorMetadata(metadata map[string]string) map[string]string {
 	filtered := make(map[string]string)
 	for k, v := range metadata {
 		// Skip all kubemirror.raczylo.com keys
-		if !strings.HasPrefix(k, "kubemirror.raczylo.com/") {
+		if !strings.HasPrefix(k, constants.Domain+"/") {
 			filtered[k] = v
 		}
 	}
@@ -136,9 +137,7 @@ func createUnstructuredMirror(source runtime.Object, targetNamespace, sourceHash
 
 	// Add mirror-specific annotations
 	annotations := buildMirrorAnnotations(source, sourceHash)
-	for k, v := range annotations {
-		existingAnnotations[k] = v
-	}
+	maps.Copy(existingAnnotations, annotations)
 	mirror.SetAnnotations(existingAnnotations)
 
 	// Remove status (never mirror status)
@@ -272,8 +271,8 @@ func UpdateMirror(mirror, source runtime.Object) error {
 	return nil
 }
 
-// convertToStringMap converts map[string]interface{} to map[string]string.
-func convertToStringMap(data map[string]interface{}) map[string]string {
+// convertToStringMap converts map[string]any to map[string]string.
+func convertToStringMap(data map[string]any) map[string]string {
 	result := make(map[string]string)
 	for k, v := range data {
 		if s, ok := v.(string); ok {
@@ -283,8 +282,8 @@ func convertToStringMap(data map[string]interface{}) map[string]string {
 	return result
 }
 
-// convertToByteMap converts map[string]interface{} to map[string][]byte.
-func convertToByteMap(data map[string]interface{}) map[string][]byte {
+// convertToByteMap converts map[string]any to map[string][]byte.
+func convertToByteMap(data map[string]any) map[string][]byte {
 	result := make(map[string][]byte)
 	for k, v := range data {
 		switch val := v.(type) {
@@ -445,13 +444,7 @@ func applyTransformations(source, mirror runtime.Object, targetNamespace string)
 
 	// Save original annotations to restore on failure
 	originalAnnotations := mirrorObj.GetAnnotations()
-	var savedAnnotations map[string]string
-	if originalAnnotations != nil {
-		savedAnnotations = make(map[string]string, len(originalAnnotations))
-		for k, v := range originalAnnotations {
-			savedAnnotations[k] = v
-		}
-	}
+	savedAnnotations := maps.Clone(originalAnnotations)
 
 	mirrorAnnotations := mirrorObj.GetAnnotations()
 	if mirrorAnnotations == nil {
@@ -504,18 +497,12 @@ func buildTransformContext(source, mirror runtime.Object, targetNamespace string
 
 	// Copy labels (if any)
 	if labels := sourceObj.GetLabels(); labels != nil {
-		ctx.Labels = make(map[string]string)
-		for k, v := range labels {
-			ctx.Labels[k] = v
-		}
+		ctx.Labels = maps.Clone(labels)
 	}
 
 	// Copy annotations (if any)
 	if annotations := sourceObj.GetAnnotations(); annotations != nil {
-		ctx.Annotations = make(map[string]string)
-		for k, v := range annotations {
-			ctx.Annotations[k] = v
-		}
+		ctx.Annotations = maps.Clone(annotations)
 	}
 
 	return ctx

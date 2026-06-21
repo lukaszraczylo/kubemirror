@@ -149,7 +149,7 @@ func (r *MirrorReconciler) SetupWithManager(mgr ctrl.Manager, gvk schema.GroupVe
 			return false
 		}
 		managedBy, exists := labels[constants.LabelManagedBy]
-		return exists && managedBy == "kubemirror"
+		return exists && managedBy == constants.ControllerName
 	})
 
 	// Convert GVK to resource object for watching
@@ -157,9 +157,7 @@ func (r *MirrorReconciler) SetupWithManager(mgr ctrl.Manager, gvk schema.GroupVe
 	gv := schema.GroupVersion{Group: gvk.Group, Version: gvk.Version}
 	obj.SetGroupVersionKind(gv.WithKind(gvk.Kind))
 
-	// Set custom controller name to avoid conflicts with source reconciler and multiple API versions
-	// Include group and version to make it truly unique
-	controllerName := gvk.Kind + "." + gvk.Version + "." + gvk.Group + "-mirror"
+	controllerName := gvkControllerName(gvk, true)
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(obj).
