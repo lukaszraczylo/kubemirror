@@ -113,13 +113,15 @@ kubectl get middleware headers -n namespace-3
 Verify that mirrored resources have the correct ownership labels:
 
 ```bash
-# Check labels on a mirrored secret
-kubectl get secret shared-credentials -n namespace-3 -o yaml | grep -A 5 labels
+# Inspect a mirrored secret's metadata
+kubectl get secret shared-credentials -n namespace-3 -o yaml
 
-# Should include:
-# kubemirror.raczylo.com/mirrored: "true"
-# kubemirror.raczylo.com/source-namespace: namespace-1
-# kubemirror.raczylo.com/source-name: shared-credentials
+# Labels should include:
+#   kubemirror.raczylo.com/managed-by: kubemirror
+#   kubemirror.raczylo.com/mirror: "true"
+# Annotations should include:
+#   kubemirror.raczylo.com/source-namespace: namespace-1
+#   kubemirror.raczylo.com/source-name: shared-credentials
 ```
 
 ## Testing Update Propagation
@@ -213,25 +215,11 @@ kubectl get pods -n kubemirror-system
 
 ## Advanced Examples
 
-### Mirror to All Except Specific Namespaces
-
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: almost-all
-  namespace: namespace-1
-  annotations:
-    kubemirror.raczylo.com/sync: "true"
-    kubemirror.raczylo.com/target-namespaces: "all"
-    kubemirror.raczylo.com/excluded-namespaces: "namespace-3"
-  labels:
-    kubemirror.raczylo.com/enabled: "true"
-data:
-  key: dmFsdWU=  # "value" in base64
-```
-
 ### Pattern-Based Mirroring
+
+`target-namespaces` accepts glob patterns (`*` and `?`, matched with Go's
+`filepath.Match`), so you can target a family of namespaces without listing each
+one. Comma-separate multiple patterns, e.g. `"app-*,prod-*"`.
 
 ```yaml
 apiVersion: v1
@@ -241,12 +229,40 @@ metadata:
   namespace: namespace-1
   annotations:
     kubemirror.raczylo.com/sync: "true"
-    kubemirror.raczylo.com/target-namespaces: "all"
-    kubemirror.raczylo.com/namespace-pattern: "app-.*"
+    # Mirror to every namespace whose name starts with "app-"
+    kubemirror.raczylo.com/target-namespaces: "app-*"
   labels:
     kubemirror.raczylo.com/enabled: "true"
 data:
   config: "value"
+```
+
+> **Note:** Target patterns are include-only; there is no "all except namespace
+> X" target syntax. For the two real exclusion mechanisms:
+>
+> - To stop a single source resource from being mirrored (and tear down any
+>   mirrors it already created), set `kubemirror.raczylo.com/exclude: "true"` on
+>   that resource.
+> - To stop specific namespaces from ever receiving mirrors cluster-wide, use the
+>   controller's `--excluded-namespaces` flag.
+
+### Excluding a Specific Resource
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: do-not-mirror
+  namespace: namespace-1
+  annotations:
+    kubemirror.raczylo.com/sync: "true"
+    kubemirror.raczylo.com/target-namespaces: "all"
+    # Opt this resource out: it will not be mirrored even though sync is set.
+    kubemirror.raczylo.com/exclude: "true"
+  labels:
+    kubemirror.raczylo.com/enabled: "true"
+data:
+  key: dmFsdWU=
 ```
 
 ## ExternalSecrets Integration

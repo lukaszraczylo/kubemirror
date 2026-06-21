@@ -271,6 +271,34 @@ metadata:
     kubemirror.raczylo.com/allow-mirrors: "true"
 ```
 
+### Pause or Exclude a Resource
+
+Two annotations control opting a source out of mirroring:
+
+- `kubemirror.raczylo.com/exclude: "true"` — opt the resource out entirely. It is
+  not mirrored, and any mirrors it previously created are **deleted**.
+- `kubemirror.raczylo.com/paused: "true"` — **freeze** the resource. Existing
+  mirrors are left exactly as they are (no updates, no cleanup) until the
+  annotation is removed. Useful during maintenance when you want mirrors to
+  persist but stop tracking source changes.
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: shared-credentials
+  namespace: default
+  labels:
+    kubemirror.raczylo.com/enabled: "true"
+  annotations:
+    kubemirror.raczylo.com/sync: "true"
+    kubemirror.raczylo.com/target-namespaces: "all"
+    # Freeze mirrors in place (or use /exclude to remove them):
+    kubemirror.raczylo.com/paused: "true"
+data:
+  password: c2VjcmV0
+```
+
 ### Mirror Custom Resources (CRDs)
 
 KubeMirror works with any custom resource:
@@ -555,12 +583,17 @@ Complete configuration reference:
 | **Resource Discovery** | | | |
 | `controller.resourceTypes` | Explicit resource type list (empty = auto-discover all) | `[]` | `["Secret.v1", "ConfigMap.v1", "Ingress.v1.networking.k8s.io"]` |
 | `controller.discoveryInterval` | Rediscovery interval for auto-discovery mode | `5m` | `10m`, `1h` |
+| `controller.lazyWatcherInit` | Only watch resource types in use; lowers memory | `false` | `true`, `false` |
+| `controller.watcherScanInterval` | Scan interval for new types in lazy mode | `5m` | `10m` |
 | **Performance & Limits** | | | |
 | `controller.leaderElect` | Enable leader election for HA | `true` | `true`, `false` |
+| `controller.leaderElectionID` | Leader election lease name | `kubemirror-controller-leader` | |
 | `controller.maxTargets` | Maximum mirrors per source resource | `100` | `50`, `200`, `500` |
 | `controller.workerThreads` | Concurrent reconciliation workers | `5` | `10`, `20` |
 | `controller.rateLimitQPS` | API rate limit (queries per second) | `50.0` | `100.0`, `200.0` |
 | `controller.rateLimitBurst` | API burst allowance | `100` | `200`, `500` |
+| `controller.resyncPeriod` | Full cache resync period | `10m` | `30m` |
+| `controller.verifySourceFreshness` | Verify cache against a direct API read before mirroring | `false` | `true`, `false` |
 | **Namespace Filtering** | | | |
 | `controller.excludedNamespaces` | Comma-separated namespace exclusion list | `""` | `kube-system,kube-public,kube-node-lease` |
 | `controller.includedNamespaces` | Comma-separated namespace inclusion list | `""` | `app-*,prod-*` |
@@ -579,15 +612,19 @@ When running the binary directly:
 
 **Resource Discovery:**
 - `--resource-types string` - Comma-separated list (e.g., `Secret.v1,ConfigMap.v1,Ingress.v1.networking.k8s.io`)
-- `--discovery-interval duration` - Rediscovery interval (default: 5m)
+- `--discovery-interval duration` - Rediscovery interval for auto-discovery mode (default: 5m)
+- `--lazy-watcher-init` - Only create watchers for resource types actually in use; lowers memory (default: false)
+- `--watcher-scan-interval duration` - Scan interval for new types in lazy mode (default: 5m)
 
 **Performance & Limits:**
-- `--leader-elect` - Enable leader election (default: true)
+- `--leader-elect` - Enable leader election (default: false)
+- `--leader-election-id string` - Leader election lease name (default: kubemirror-controller-leader)
 - `--max-targets int` - Max mirrors per source (default: 100)
 - `--worker-threads int` - Concurrent workers (default: 5)
 - `--rate-limit-qps float32` - API rate limit (default: 50.0)
 - `--rate-limit-burst int` - API burst limit (default: 100)
-- `--verify-source-freshness` - Verify cache freshness before mirroring (default: false)
+- `--resync-period duration` - Full cache resync period (default: 10m)
+- `--verify-source-freshness` - Verify cache against a direct API read before mirroring (default: true)
 
 **Namespace Filtering:**
 - `--excluded-namespaces string` - Comma-separated exclusion list
