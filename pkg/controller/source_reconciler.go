@@ -238,8 +238,9 @@ func (r *SourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Get target namespaces
-	targetNamespaces, err := r.resolveTargetNamespaces(ctx, sourceObj)
+	// Get target namespaces (nsInfo is reused for orphan cleanup below so a
+	// reconcile pass performs a single namespace LIST instead of two)
+	targetNamespaces, nsInfo, err := r.resolveTargetNamespaces(ctx, sourceObj)
 	if err != nil {
 		logger.Error(err, "failed to resolve target namespaces")
 		if r.CircuitBreaker != nil {
@@ -268,7 +269,7 @@ func (r *SourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	// Clean up orphaned mirrors (namespaces that no longer match the target criteria)
-	orphanedCount, err := r.cleanupOrphanedMirrors(ctx, sourceObj, targetNamespaces)
+	orphanedCount, err := r.cleanupOrphanedMirrors(ctx, sourceObj, targetNamespaces, nsInfo)
 	if err != nil {
 		logger.Error(err, "failed to cleanup orphaned mirrors")
 		// Don't fail reconciliation for cleanup errors, just log them
@@ -356,19 +357,12 @@ func (r *SourceReconciler) reconcileMirror(ctx context.Context, source runtime.O
 		return fmt.Errorf("failed to get existing mirror: %w", err)
 	}
 
-	// If freshness verification is enabled and mirror exists, verify it's fresh too
-	if err == nil && r.Config.VerifySourceFreshness && r.APIReader != nil {
-		fresh := &unstructured.Unstructured{}
-		fresh.SetGroupVersionKind(sourceUnstructured.GroupVersionKind())
-		if apiErr := r.APIReader.Get(ctx, client.ObjectKey{Namespace: targetNs, Name: sourceObj.GetName()}, fresh); apiErr == nil {
-			if fresh.GetResourceVersion() != existing.GetResourceVersion() {
-				logger.V(2).Info("mirror cache stale, using fresh API version",
-					"cachedRV", existing.GetResourceVersion(),
-					"freshRV", fresh.GetResourceVersion())
-				existing = fresh
-			}
-		}
-	}
+	// The cached mirror is intentionally NOT re-verified against the apiserver.
+	// A stale cache read is harmless here: content drift is detected via the
+	// source hash annotation, and a stale resourceVersion makes the Update below
+	// fail with a conflict, which requeues the source. A direct read at this
+	// point costs one apiserver GET per target namespace on every reconcile
+	// (sources x targets x resync), which overloads the control plane.
 
 	if err == nil {
 		// Mirror exists - check if it's managed by us
@@ -475,13 +469,17 @@ func (r *SourceReconciler) deleteAllMirrors(ctx context.Context, sourceObj metav
 
 // cleanupOrphanedMirrors removes mirrors that exist but are no longer in the target list.
 // This handles cases where target-namespaces annotation changes (e.g., "all" → "all-labeled" or "app-*" → "prod-*").
-func (r *SourceReconciler) cleanupOrphanedMirrors(ctx context.Context, sourceObj metav1.Object, targetNamespaces []string) (int, error) {
+// The caller passes the NamespaceInfo it already listed during target
+// resolution; a nil nsInfo triggers a fresh list as a fallback.
+func (r *SourceReconciler) cleanupOrphanedMirrors(ctx context.Context, sourceObj metav1.Object, targetNamespaces []string, nsInfo *NamespaceInfo) (int, error) {
 	logger := log.FromContext(ctx)
 
-	// List all namespaces using unified method for consistency
-	nsInfo, err := r.NamespaceLister.ListNamespacesWithLabels(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("failed to list namespaces: %w", err)
+	if nsInfo == nil {
+		var err error
+		nsInfo, err = r.NamespaceLister.ListNamespacesWithLabels(ctx)
+		if err != nil {
+			return 0, fmt.Errorf("failed to list namespaces: %w", err)
+		}
 	}
 	allNamespaces := nsInfo.All
 
@@ -525,21 +523,23 @@ func (r *SourceReconciler) cleanupOrphanedMirrors(ctx context.Context, sourceObj
 }
 
 // resolveTargetNamespaces determines which namespaces should receive mirrors.
-func (r *SourceReconciler) resolveTargetNamespaces(ctx context.Context, sourceObj metav1.Object) ([]string, error) {
+// It also returns the NamespaceInfo it listed (nil when resolution ended before
+// listing) so callers can reuse it instead of issuing a second namespace LIST.
+func (r *SourceReconciler) resolveTargetNamespaces(ctx context.Context, sourceObj metav1.Object) ([]string, *NamespaceInfo, error) {
 	annotations := sourceObj.GetAnnotations()
 	if annotations == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	targetNsAnnotation := annotations[constants.AnnotationTargetNamespaces]
 	if targetNsAnnotation == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// Parse patterns
 	patterns := filter.ParseTargetNamespaces(targetNsAnnotation)
 	if len(patterns) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// Validate patterns and log warnings for invalid ones
@@ -567,14 +567,14 @@ func (r *SourceReconciler) resolveTargetNamespaces(ctx context.Context, sourceOb
 
 		// If no valid patterns remain, return empty
 		if len(patterns) == 0 {
-			return nil, nil
+			return nil, nil, nil
 		}
 	}
 
 	// Get all namespace info in a single API call (more efficient than 3 separate calls)
 	nsInfo, err := r.NamespaceLister.ListNamespacesWithLabels(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list namespaces: %w", err)
+		return nil, nil, fmt.Errorf("failed to list namespaces: %w", err)
 	}
 
 	// Resolve target namespaces using the pre-categorized namespace info
@@ -592,7 +592,7 @@ func (r *SourceReconciler) resolveTargetNamespaces(ctx context.Context, sourceOb
 		targetNamespaces = targetNamespaces[:r.Config.MaxTargetsPerResource]
 	}
 
-	return targetNamespaces, nil
+	return targetNamespaces, nsInfo, nil
 }
 
 // updateLastSyncStatus updates the source resource's sync-status annotation.

@@ -624,7 +624,7 @@ When running the binary directly:
 - `--rate-limit-qps float32` - API rate limit (default: 50.0)
 - `--rate-limit-burst int` - API burst limit (default: 100)
 - `--resync-period duration` - Full cache resync period (default: 10m)
-- `--verify-source-freshness` - Verify cache against a direct API read before mirroring (default: true)
+- `--verify-source-freshness` - Verify cache against a direct API read before mirroring (default: false)
 
 **Namespace Filtering:**
 - `--excluded-namespaces string` - Comma-separated exclusion list

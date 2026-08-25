@@ -110,12 +110,12 @@ func main() {
 		"Burst limit for API server requests.")
 	flag.DurationVar(&resyncPeriod, "resync-period", 10*time.Minute,
 		"Period for resyncing all resources (catches updates missed due to informer cache delays).")
-	flag.BoolVar(&verifySourceFreshness, "verify-source-freshness", true,
+	flag.BoolVar(&verifySourceFreshness, "verify-source-freshness", false,
 		"Verify source resource freshness by comparing cache with direct API read. "+
-			"Prevents mirroring stale data and missed orphan cleanups when the informer "+
-			"cache lags behind watch events. Trade-off: one extra API call per reconcile "+
-			"when the cache is stale. Disable only if you are confident your cluster's "+
-			"watch latency is negligible.")
+			"Converges a few seconds faster when the informer cache lags behind watch "+
+			"events, at the cost of one direct apiserver GET per reconcile. Off by "+
+			"default: a stale read self-corrects on the next watch event, and update "+
+			"conflicts requeue automatically.")
 	flag.BoolVar(&lazyWatcherInit, "lazy-watcher-init", false,
 		"Enable lazy watcher initialization - only create informers for resource types that have resources marked for mirroring. "+
 			"Significantly reduces memory usage by avoiding watchers for unused resource types. "+

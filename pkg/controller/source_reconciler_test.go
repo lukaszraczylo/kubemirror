@@ -381,7 +381,7 @@ func TestSourceReconciler_resolveTargetNamespaces(t *testing.T) {
 				},
 			}
 
-			got, err := r.resolveTargetNamespaces(context.Background(), sourceObj)
+			got, _, err := r.resolveTargetNamespaces(context.Background(), sourceObj)
 
 			if tt.wantError {
 				require.Error(t, err)
@@ -555,7 +555,7 @@ func BenchmarkResolveTargetNamespaces(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_, _ = r.resolveTargetNamespaces(ctx, sourceObj)
+		_, _, _ = r.resolveTargetNamespaces(ctx, sourceObj)
 	}
 }
 
@@ -640,7 +640,7 @@ func TestSourceReconciler_cleanupOrphanedMirrors(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	deletedCount, err := r.cleanupOrphanedMirrors(ctx, sourceObj, targetNamespaces)
+	deletedCount, err := r.cleanupOrphanedMirrors(ctx, sourceObj, targetNamespaces, nil)
 
 	require.NoError(t, err)
 	assert.Equal(t, 1, deletedCount, "should have deleted 1 orphaned mirror")
@@ -1272,4 +1272,95 @@ func TestSourceReconciler_updateLastSyncStatus_writesWhenChanged(t *testing.T) {
 
 	assert.Equal(t, "reconciled:3,errors:0", source.GetAnnotations()[constants.AnnotationSyncStatus])
 	mockClient.AssertCalled(t, "Update", mock.Anything, mock.Anything, mock.Anything)
+}
+
+// countingReader is a client.Reader that counts direct API reads. It stands in
+// for the manager's APIReader so tests can assert the reconcile hot path never
+// bypasses the informer cache.
+type countingReader struct {
+	gets  int
+	lists int
+}
+
+func (c *countingReader) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	c.gets++
+	return errors.NewNotFound(schema.GroupResource{Resource: "secrets"}, key.Name)
+}
+
+func (c *countingReader) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	c.lists++
+	return nil
+}
+
+// newMirrorTestSource builds an unstructured Secret source enabled for mirroring.
+func newMirrorTestSource(t *testing.T) *unstructured.Unstructured {
+	t.Helper()
+	source := &unstructured.Unstructured{}
+	source.SetGroupVersionKind(schema.GroupVersionKind{Version: "v1", Kind: "Secret"})
+	source.SetNamespace("default")
+	source.SetName("test-secret")
+	source.SetLabels(map[string]string{constants.LabelEnabled: "true"})
+	source.SetAnnotations(map[string]string{
+		constants.AnnotationSync:             "true",
+		constants.AnnotationTargetNamespaces: "all",
+	})
+	require.NoError(t, unstructured.SetNestedField(source.Object, "Opaque", "type"))
+	return source
+}
+
+// TestSourceReconciler_reconcileMirror_NoDirectAPIReads is a load regression
+// test: with an up-to-date mirror in the cache, reconcileMirror must complete
+// without a single direct API read. A per-target APIReader.Get here multiplies
+// into (sources x target namespaces) apiserver GETs on every resync and has
+// melted a control-plane node before.
+func TestSourceReconciler_reconcileMirror_NoDirectAPIReads(t *testing.T) {
+	source := newMirrorTestSource(t)
+
+	mirrorObj, err := CreateMirror(source, "target-ns")
+	require.NoError(t, err)
+	mirror, ok := mirrorObj.(*unstructured.Unstructured)
+	require.True(t, ok, "unstructured source must produce an unstructured mirror")
+	mirror.SetResourceVersion("100")
+
+	mockClient := new(MockClient)
+	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "target-ns", Name: "test-secret"}, mock.Anything).
+		Return(nil, mirror)
+
+	reader := &countingReader{}
+	r := &SourceReconciler{
+		Client:    mockClient,
+		APIReader: reader,
+		Config:    &config.Config{VerifySourceFreshness: true},
+		GVK:       source.GroupVersionKind(),
+	}
+
+	require.NoError(t, r.reconcileMirror(context.Background(), source, source, "target-ns"))
+
+	assert.Zero(t, reader.gets, "steady-state mirror reconcile must not GET from the apiserver directly")
+	assert.Zero(t, reader.lists, "steady-state mirror reconcile must not LIST from the apiserver directly")
+	mockClient.AssertNotCalled(t, "Update", mock.Anything, mock.Anything, mock.Anything)
+}
+
+// TestSourceReconciler_getSourceWithFreshness_DefaultNoDirectRead locks the
+// default behaviour: freshness verification is opt-in, so the default config
+// must serve the source straight from the informer cache.
+func TestSourceReconciler_getSourceWithFreshness_DefaultNoDirectRead(t *testing.T) {
+	source := newMirrorTestSource(t)
+
+	mockClient := new(MockClient)
+	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "default", Name: "test-secret"}, mock.Anything).
+		Return(nil, source)
+
+	reader := &countingReader{}
+	r := &SourceReconciler{
+		Client:    mockClient,
+		APIReader: reader,
+		Config:    &config.Config{},
+		GVK:       source.GroupVersionKind(),
+	}
+
+	got, err := r.getSourceWithFreshness(context.Background(), client.ObjectKey{Namespace: "default", Name: "test-secret"}, r.GVK)
+	require.NoError(t, err)
+	assert.Equal(t, "test-secret", got.GetName())
+	assert.Zero(t, reader.gets, "default config must not verify freshness against the apiserver")
 }

@@ -196,8 +196,9 @@ func (r *NamespaceReconciler) reconcileResourceType(ctx context.Context, rt conf
 // (pattern parsing/validation, namespace listing, max-targets clamping) lives in
 // exactly one place, mirroring the reconcileMirror delegation below.
 func (r *NamespaceReconciler) resolveTargetNamespaces(ctx context.Context, source *unstructured.Unstructured) ([]string, error) {
-	return r.newSourceReconciler(source.GroupVersionKind()).
+	targets, _, err := r.newSourceReconciler(source.GroupVersionKind()).
 		resolveTargetNamespaces(ctx, source)
+	return targets, err
 }
 
 // reconcileMirror creates or updates a mirror in the target namespace by
