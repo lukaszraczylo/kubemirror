@@ -378,8 +378,19 @@ func (r *SourceReconciler) reconcileMirror(ctx context.Context, source runtime.O
 		}
 
 		if !needsSync {
-			logger.V(2).Info("mirror is up to date")
-			return nil
+			// The source is unchanged since the last sync, but the mirrored
+			// copy itself may have been edited in place (its bookkeeping
+			// annotations would still match the source). Rebuild the expected
+			// mirror in memory and compare content hashes to catch that.
+			drifted, driftErr := mirrorContentDrifted(source, existing, targetNs)
+			if driftErr != nil {
+				return fmt.Errorf("failed to check mirror drift: %w", driftErr)
+			}
+			if !drifted {
+				logger.V(2).Info("mirror is up to date")
+				return nil
+			}
+			logger.Info("mirror content drifted from expected state, repairing")
 		}
 
 		// Update mirror
@@ -419,6 +430,30 @@ func (r *SourceReconciler) reconcileMirror(ctx context.Context, source runtime.O
 
 	logger.V(1).Info("mirror created and verified")
 	return nil
+}
+
+// mirrorContentDrifted reports whether the live mirror's content diverged from
+// what mirroring the source into targetNs should produce. It rebuilds the
+// expected mirror in memory (including transformations) and compares content
+// hashes, so metadata-only differences never count as drift. This is what
+// makes drift repair event-driven instead of depending on the periodic resync.
+func mirrorContentDrifted(source runtime.Object, existing *unstructured.Unstructured, targetNs string) (bool, error) {
+	expected, err := CreateMirror(source, targetNs)
+	if err != nil {
+		return false, fmt.Errorf("failed to build expected mirror: %w", err)
+	}
+
+	expectedHash, err := hash.ComputeContentHash(expected)
+	if err != nil {
+		return false, fmt.Errorf("failed to hash expected mirror: %w", err)
+	}
+
+	existingHash, err := hash.ComputeContentHash(existing)
+	if err != nil {
+		return false, fmt.Errorf("failed to hash existing mirror: %w", err)
+	}
+
+	return expectedHash != existingHash, nil
 }
 
 // deleteAllMirrors deletes all mirrors that this source owns across the cluster.
@@ -680,24 +715,41 @@ func (r *SourceReconciler) SetupWithManagerForResourceType(
 	mirrorObj := &unstructured.Unstructured{}
 	mirrorObj.SetGroupVersionKind(gvk)
 
-	// Create predicates to only watch mirror deletions
-	mirrorDeletePredicate := predicate.Funcs{
-		CreateFunc:  func(e event.CreateEvent) bool { return false },
-		UpdateFunc:  func(e event.UpdateEvent) bool { return false },
-		DeleteFunc:  func(e event.DeleteEvent) bool { return IsMirrorResource(e.Object) },
-		GenericFunc: func(e event.GenericEvent) bool { return false },
-	}
-
 	return ctrl.NewControllerManagedBy(mgr).
 		For(obj).
 		Named(controllerName).
-		// Watch mirror resources - when deleted, enqueue source for reconciliation
+		// Watch mirror resources - deletes trigger recreation, real writes
+		// trigger drift repair. This keeps mirrors converged without relying
+		// on the periodic resync.
 		Watches(
 			mirrorObj,
 			handler.EnqueueRequestsFromMapFunc(r.mapMirrorToSource),
-			builder.WithPredicates(mirrorDeletePredicate),
+			builder.WithPredicates(mirrorEventPredicate()),
 		).
 		Complete(r)
+}
+
+// mirrorEventPredicate gates the mirror watch. Deletes of managed mirrors
+// enqueue the source so the mirror is recreated. Updates enqueue the source
+// so in-place edits to a mirror are repaired event-driven; informer resync
+// replays carry an unchanged resourceVersion and are filtered out, so only
+// real writes pass. The controller's own mirror writes pass too and converge
+// in one extra reconcile that no-ops on the content comparison.
+func mirrorEventPredicate() predicate.Funcs {
+	return predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool { return false },
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			if e.ObjectOld == nil || e.ObjectNew == nil {
+				return false
+			}
+			if e.ObjectOld.GetResourceVersion() == e.ObjectNew.GetResourceVersion() {
+				return false
+			}
+			return IsMirrorResource(e.ObjectNew)
+		},
+		DeleteFunc:  func(e event.DeleteEvent) bool { return IsMirrorResource(e.Object) },
+		GenericFunc: func(e event.GenericEvent) bool { return false },
+	}
 }
 
 // mapMirrorToSource maps a mirror resource to its source for reconciliation.

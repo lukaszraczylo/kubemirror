@@ -53,7 +53,7 @@ Defaults are taken from [`values.yaml`](values.yaml).
 | `controller.leaderElectionID` | `"kubemirror-controller-leader"` | Lease name (`--leader-election-id`). |
 | `controller.resourceTypes` | `[]` | Resource types to mirror (`--resource-types`). Empty enables auto-discovery. |
 | `controller.discoveryInterval` | `"5m"` | Auto-discovery interval (`--discovery-interval`). |
-| `controller.resyncPeriod` | `"10m"` | Cache resync period (`--resync-period`). |
+| `controller.resyncPeriod` | `"1h"` | Cache resync period, safety net only (`--resync-period`). |
 | `controller.maxTargets` | `100` | Max target namespaces per resource (`--max-targets`). |
 | `controller.workerThreads` | `5` | Concurrent reconcile workers (`--worker-threads`). |
 | `controller.rateLimitQPS` | `50.0` | API QPS limit (`--rate-limit-qps`). |

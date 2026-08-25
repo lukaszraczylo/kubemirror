@@ -108,8 +108,10 @@ func main() {
 		"QPS rate limit for API server requests.")
 	flag.IntVar(&rateLimitBurst, "rate-limit-burst", 100,
 		"Burst limit for API server requests.")
-	flag.DurationVar(&resyncPeriod, "resync-period", 10*time.Minute,
-		"Period for resyncing all resources (catches updates missed due to informer cache delays).")
+	flag.DurationVar(&resyncPeriod, "resync-period", time.Hour,
+		"Period for the full informer resync. Sources, mirrors, and namespaces "+
+			"are watched, and mirror drift is repaired event-driven, so the resync "+
+			"is only a safety net for missed watch events.")
 	flag.BoolVar(&verifySourceFreshness, "verify-source-freshness", false,
 		"Verify source resource freshness by comparing cache with direct API read. "+
 			"Converges a few seconds faster when the informer cache lags behind watch "+

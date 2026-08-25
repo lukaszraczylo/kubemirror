@@ -592,7 +592,7 @@ Complete configuration reference:
 | `controller.workerThreads` | Concurrent reconciliation workers | `5` | `10`, `20` |
 | `controller.rateLimitQPS` | API rate limit (queries per second) | `50.0` | `100.0`, `200.0` |
 | `controller.rateLimitBurst` | API burst allowance | `100` | `200`, `500` |
-| `controller.resyncPeriod` | Full cache resync period | `10m` | `30m` |
+| `controller.resyncPeriod` | Full cache resync period (safety net; drift repair is event-driven) | `1h` | `30m` |
 | `controller.verifySourceFreshness` | Verify cache against a direct API read before mirroring | `false` | `true`, `false` |
 | **Namespace Filtering** | | | |
 | `controller.excludedNamespaces` | Comma-separated namespace exclusion list | `""` | `kube-system,kube-public,kube-node-lease` |
@@ -623,7 +623,7 @@ When running the binary directly:
 - `--worker-threads int` - Concurrent workers (default: 5)
 - `--rate-limit-qps float32` - API rate limit (default: 50.0)
 - `--rate-limit-burst int` - API burst limit (default: 100)
-- `--resync-period duration` - Full cache resync period (default: 10m)
+- `--resync-period duration` - Full cache resync period, a safety net for missed watch events (default: 1h)
 - `--verify-source-freshness` - Verify cache against a direct API read before mirroring (default: false)
 
 **Namespace Filtering:**

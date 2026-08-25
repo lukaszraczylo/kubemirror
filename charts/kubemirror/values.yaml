@@ -54,10 +54,11 @@ controller:
   # How often to rediscover available resources in the cluster
   discoveryInterval: "5m"
 
-  # Cache resync period - how often to refresh all cached resources
+  # Cache resync period - safety net for missed watch events; mirror drift
+  # is repaired event-driven, so this can stay long
   # Higher values reduce memory churn and API load
   # Default: 10m (was 30s in earlier versions)
-  resyncPeriod: "10m"
+  resyncPeriod: "1h"
 
   # Resource limits
   maxTargets: 100

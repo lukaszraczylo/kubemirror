@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	"github.com/lukaszraczylo/kubemirror/pkg/config"
 	"github.com/lukaszraczylo/kubemirror/pkg/constants"
@@ -1363,4 +1364,76 @@ func TestSourceReconciler_getSourceWithFreshness_DefaultNoDirectRead(t *testing.
 	require.NoError(t, err)
 	assert.Equal(t, "test-secret", got.GetName())
 	assert.Zero(t, reader.gets, "default config must not verify freshness against the apiserver")
+}
+
+// TestMirrorEventPredicate locks the mirror-watch gating: real writes to a
+// mirror enqueue its source for drift repair, while informer resync replays
+// (unchanged resourceVersion), non-mirror objects, and creates stay silent.
+func TestMirrorEventPredicate(t *testing.T) {
+	source := newMirrorTestSource(t)
+	mirrorObj, err := CreateMirror(source, "target-ns")
+	require.NoError(t, err)
+	mirror, ok := mirrorObj.(*unstructured.Unstructured)
+	require.True(t, ok)
+	mirror.SetResourceVersion("100")
+
+	changed := mirror.DeepCopy()
+	changed.SetResourceVersion("101")
+
+	nonMirrorOld := source.DeepCopy()
+	nonMirrorOld.SetResourceVersion("1")
+	nonMirrorNew := source.DeepCopy()
+	nonMirrorNew.SetResourceVersion("2")
+
+	p := mirrorEventPredicate()
+
+	assert.False(t, p.Create(event.CreateEvent{Object: mirror}),
+		"mirror create must not enqueue")
+	assert.True(t, p.Update(event.UpdateEvent{ObjectOld: mirror, ObjectNew: changed}),
+		"real mirror write must enqueue the source for drift repair")
+	assert.False(t, p.Update(event.UpdateEvent{ObjectOld: mirror, ObjectNew: mirror}),
+		"informer resync replay with unchanged resourceVersion must not enqueue")
+	assert.False(t, p.Update(event.UpdateEvent{ObjectOld: nonMirrorOld, ObjectNew: nonMirrorNew}),
+		"non-mirror update must not enqueue")
+	assert.True(t, p.Delete(event.DeleteEvent{Object: mirror}),
+		"mirror delete must enqueue the source for recreation")
+	assert.False(t, p.Delete(event.DeleteEvent{Object: source}),
+		"non-mirror delete must not enqueue")
+}
+
+// TestSourceReconciler_reconcileMirror_RepairsDriftedMirror covers in-place
+// mirror tampering: the mirrored data is edited but the bookkeeping
+// annotations are left intact, so the source-hash check alone would consider
+// the mirror up to date. The reconciler must detect the content divergence
+// and rewrite the mirror — still without any direct API reads.
+func TestSourceReconciler_reconcileMirror_RepairsDriftedMirror(t *testing.T) {
+	source := newMirrorTestSource(t)
+
+	mirrorObj, err := CreateMirror(source, "target-ns")
+	require.NoError(t, err)
+	mirror, ok := mirrorObj.(*unstructured.Unstructured)
+	require.True(t, ok)
+	mirror.SetResourceVersion("100")
+
+	// Tamper with the mirrored content in place; annotations stay intact.
+	require.NoError(t, unstructured.SetNestedStringMap(mirror.Object,
+		map[string]string{"tampered-field": "dGFtcGVyZWQ="}, "data"))
+
+	mockClient := new(MockClient)
+	mockClient.On("Get", mock.Anything, types.NamespacedName{Namespace: "target-ns", Name: "test-secret"}, mock.Anything).
+		Return(nil, mirror)
+	mockClient.On("Update", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	reader := &countingReader{}
+	r := &SourceReconciler{
+		Client:    mockClient,
+		APIReader: reader,
+		Config:    &config.Config{},
+		GVK:       source.GroupVersionKind(),
+	}
+
+	require.NoError(t, r.reconcileMirror(context.Background(), source, source, "target-ns"))
+
+	mockClient.AssertCalled(t, "Update", mock.Anything, mock.Anything, mock.Anything)
+	assert.Zero(t, reader.gets, "drift repair must not read from the apiserver directly")
 }
