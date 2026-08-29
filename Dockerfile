@@ -1,6 +1,10 @@
 # Build stage
 FROM golang:1.26-alpine AS builder
 
+# Populated by buildx per platform; without this declaration the
+# GOARCH=${TARGETARCH:-amd64} below silently builds amd64 for every platform.
+ARG TARGETARCH
+
 # Install ca-certificates for HTTPS support
 RUN apk add --no-cache ca-certificates
 
